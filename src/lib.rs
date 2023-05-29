@@ -1,4 +1,4 @@
-use parco::PositionedString;
+use parco::{PositionedString, Rest};
 
 pub enum Error {
     ExtraColon,
@@ -21,23 +21,26 @@ pub struct ActionInvocation {
 
 pub type ParsingResult<'a, T> = parco::Result<T, PositionedString<'a>, Error>;
 
-struct Rest<T>(pub T);
-
-fn parse_indentation(input: PositionedString) -> (usize, Rest(PositionedString)) {
-    for c in parco::one_part() {}
+fn parse_indentation(mut line: PositionedString) -> (usize, Rest<PositionedString>) {
+    let mut level = 0;
+    while let parco::Result::Ok((c, Rest(rest))) = parco::one_part::<_, ()>(line) {
+        if c == '-' {
+            level += 1;
+        } else if !c.is_whitespace() || c == '\n' {
+            break;
+        }
+        line = rest;
+    }
+    (level, Rest(line))
 }
+
+fn parse_lines(lines: impl Iterator<Item = &str>) -> impl Iterator
 
 pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
     let action_invocations = Vec::new();
     let program = PositionedString::from(program);
     for line in program.split("\n") {
-        let chars = line.chars();
-        
-        for c in chars {
-            if c.is_whitespace() {
-                continue;
-            }
-        }
+        let (indentation_level, Rest(rest)) = parse_indentation(line);
     }
 }
 
