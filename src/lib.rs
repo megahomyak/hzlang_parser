@@ -1,8 +1,40 @@
-use parco::{PositionedString, Rest};
-
 pub enum Error {
-    ExtraColon,
-    UnexpectedIndentation,
+    ExtraColon {
+        line_number: usize,
+    },
+    UnexpectedIndentation {
+        line_number: usize,
+        present_indentation: usize,
+    },
+}
+
+fn take(s: &str) -> Option<char> {}
+
+mod lines {
+    use crate::ActionInvocation;
+
+    pub enum Error {
+        ExtraColon {
+            line_number: usize,
+        },
+        UnexpectedIndentation {
+            line_index: usize,
+            present_indentation: usize,
+        },
+    }
+
+    fn parse<'a>(raw_lines: impl Iterator<Item = &'a str>) -> Result<Vec<ActionInvocation>, Error> {
+        // Repeat while there are lines:
+        // * Remove the empty lines
+        // * Read a line that either creates an indent or not (no lines may be indented until now)
+        // * If it indents, call this function recursively, removing one level of indentation from the
+        // following input strings (only pass the lines that are indented)
+        // * If it does not indent, just parse the line and move on
+        let parsed_lines = Vec::new();
+        for (line_index, raw_line) in raw_lines.enumerate() {
+
+        }
+    }
 }
 
 pub struct Expression {
@@ -19,29 +51,9 @@ pub struct ActionInvocation {
     attached_invocations: Vec<ActionInvocation>,
 }
 
-pub type ParsingResult<'a, T> = parco::Result<T, PositionedString<'a>, Error>;
-
-fn parse_indentation(mut line: PositionedString) -> (usize, Rest<PositionedString>) {
-    let mut level = 0;
-    while let parco::Result::Ok((c, Rest(rest))) = parco::one_part::<_, ()>(line) {
-        if c == '-' {
-            level += 1;
-        } else if !c.is_whitespace() || c == '\n' {
-            break;
-        }
-        line = rest;
-    }
-    (level, Rest(line))
-}
-
-fn parse_lines(lines: impl Iterator<Item = &str>) -> impl Iterator
-
 pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
     let action_invocations = Vec::new();
-    let program = PositionedString::from(program);
-    for line in program.split("\n") {
-        let (indentation_level, Rest(rest)) = parse_indentation(line);
-    }
+    todo!()
 }
 
 #[cfg(test)]
