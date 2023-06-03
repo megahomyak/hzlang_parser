@@ -6,8 +6,6 @@ pub enum Error {
     },
 }
 
-pub type Range = std::ops::Range<usize>;
-
 mod filler {
     use crate::{Filler, Word};
 
@@ -24,53 +22,48 @@ mod filler {
 }
 
 mod lines {
-    use crate::{ActionInvocation, Range};
+    use crate::ActionInvocation;
 
     pub enum Error {
         UnexpectedIndentation {
             line_index: usize,
             present_indentation_level: usize,
-            expected_indentation_levels_range: Range,
+            expected_indentation_levels: Vec<usize>,
         },
     }
 
     pub fn parse<'a>(
         raw_lines: impl Iterator<Item = &'a str>,
-        current_indentation_level: usize,
     ) -> Result<Vec<ActionInvocation<'a>>, Error> {
-        let mut parsed_lines = Vec::new();
-        let mut previous_indentation_level = None;
-        for (line_index, mut raw_line) in raw_lines.enumerate() {
+        struct IndentedLine<'a> {
+            content: &'a str,
+            indentation_level: usize,
+        }
+
+        let mut indented_lines = Vec::new();
+        for mut raw_line in raw_lines {
             let mut indentation_level = 0;
             let unindented_line = loop {
                 raw_line = raw_line.trim_start_matches(char::is_whitespace);
                 raw_line = match raw_line.strip_prefix("-") {
-                    None => break raw_line,
+                    None => {
+                        break IndentedLine {
+                            content: raw_line,
+                            indentation_level,
+                        }
+                    }
                     Some(raw_line) => {
                         indentation_level += 1;
                         raw_line
                     }
                 }
             };
-
-            match previous_indentation_level {
-                None => {
-                    if indentation_level != 0 {
-                        return Err(Error::UnexpectedIndentation {
-                            line_index,
-                            present_indentation_level: indentation_level,
-                            expected_indentation_levels_range: Range {},
-                        });
-                    }
-                }
-                Some(previous_indentation_level) => {
-
-                }
-            }
-
-            previous_indentation_level = Some(indentation_level);
         }
 
+        let mut previous_line_indentation = 
+        for indented_line in indented_lines {
+
+        }
         todo!()
     }
 }
