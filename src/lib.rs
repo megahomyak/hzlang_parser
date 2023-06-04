@@ -11,7 +11,7 @@ pub type Range = std::ops::Range<usize>;
 mod filler {
     use crate::{Filler, Word};
 
-    pub enum Error {}
+    pub struct Error {}
 
     pub fn parse(words: &str) -> Result<Filler, Error> {
         Ok(Filler {
@@ -19,6 +19,40 @@ mod filler {
                 .split_whitespace()
                 .map(|word| Word::Raw(word))
                 .collect(),
+        })
+    }
+}
+
+mod line {
+    use crate::{filler, Filler};
+
+    pub struct Line<'a> {
+        unindented_line: Filler<'a>,
+        indentation_level: usize,
+    }
+
+    pub struct Error {}
+
+    pub fn parse(raw_line: &str) -> Result<Line, Error> {
+        let mut indentation_level = 0;
+        let unindented_line = loop {
+            raw_line = raw_line.trim_start_matches(char::is_whitespace);
+            raw_line = match raw_line.strip_prefix("-") {
+                None => break raw_line,
+                Some(raw_line) => {
+                    indentation_level += 1;
+                    raw_line
+                }
+            }
+        };
+        let unindented_line = match filler::parse(unindented_line) {
+            Ok(filler) => filler,
+            Err(error) => {return Err(Error {})}
+        };
+
+        Ok(Line {
+            indentation_level,
+            unindented_line,
         })
     }
 }
@@ -63,9 +97,7 @@ mod lines {
                         });
                     }
                 }
-                Some(previous_indentation_level) => {
-
-                }
+                Some(previous_indentation_level) => {}
             }
 
             previous_indentation_level = Some(indentation_level);
