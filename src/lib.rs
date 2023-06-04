@@ -23,42 +23,8 @@ mod filler {
     }
 }
 
-mod line {
-    use crate::{filler, Filler};
-
-    pub struct Line<'a> {
-        unindented_line: Filler<'a>,
-        indentation_level: usize,
-    }
-
-    pub struct Error {}
-
-    pub fn parse(raw_line: &str) -> Result<Line, Error> {
-        let mut indentation_level = 0;
-        let unindented_line = loop {
-            raw_line = raw_line.trim_start_matches(char::is_whitespace);
-            raw_line = match raw_line.strip_prefix("-") {
-                None => break raw_line,
-                Some(raw_line) => {
-                    indentation_level += 1;
-                    raw_line
-                }
-            }
-        };
-        let unindented_line = match filler::parse(unindented_line) {
-            Ok(filler) => filler,
-            Err(error) => {return Err(Error {})}
-        };
-
-        Ok(Line {
-            indentation_level,
-            unindented_line,
-        })
-    }
-}
-
 mod lines {
-    use crate::{ActionInvocation, Range};
+    use crate::{filler, ActionInvocation, Range};
 
     pub enum Error {
         UnexpectedIndentation {
@@ -70,39 +36,40 @@ mod lines {
 
     pub fn parse<'a>(
         raw_lines: impl Iterator<Item = &'a str>,
-        current_indentation_level: usize,
     ) -> Result<Vec<ActionInvocation<'a>>, Error> {
-        let mut parsed_lines = Vec::new();
-        let mut previous_indentation_level = None;
-        for (line_index, mut raw_line) in raw_lines.enumerate() {
-            let mut indentation_level = 0;
-            let unindented_line = loop {
-                raw_line = raw_line.trim_start_matches(char::is_whitespace);
-                raw_line = match raw_line.strip_prefix("-") {
-                    None => break raw_line,
-                    Some(raw_line) => {
-                        indentation_level += 1;
-                        raw_line
-                    }
-                }
-            };
-
-            match previous_indentation_level {
+        let mut raw_lines = raw_lines.enumerate().peekable();
+        let mut action_invocations = Vec::new();
+        for (line_index, raw_line) in raw_lines {
+            let raw_line = raw_line.trim_start_matches(char::is_whitespace);
+            match raw_line.strip_prefix("-") {
                 None => {
-                    if indentation_level != 0 {
-                        return Err(Error::UnexpectedIndentation {
-                            line_index,
-                            present_indentation_level: indentation_level,
-                            expected_indentation_levels_range: Range {},
-                        });
-                    }
+                    let contents = match filler::parse(raw_line) {
+                        Ok(contents) => contents,
+                        Err(filler::Error {}) => unimplemented!(),
+                    };
+                    parsed_lines.push(ActionInvocation {
+                        contents,
+                        attached_invocations: Vec::new(),
+                    })
+                },
+                Some(raw_line) => {
+                    raw_lines.peek().and_then(|(line_index, raw_line)| {
+                        let raw_line = raw_line.trim_start_matches(char::is_whitespace);
+                        raw_line.strip_prefix("-")
+                    })
                 }
-                Some(previous_indentation_level) => {}
             }
-
-            previous_indentation_level = Some(indentation_level);
         }
-
+        let mut action_invocations = Vec::new();
+        let Some((mut line_index, mut previous_line)) = raw_lines.next() else {
+            return Ok(action_invocations);
+        };
+        loop {
+            let Some((line_index, current_line)) = match raw_lines.next() {
+                Some(values) => values,
+                None => return Ok(action_invocations),
+            };
+        }
         todo!()
     }
 }
@@ -116,7 +83,7 @@ pub enum Word<'a> {
 }
 
 pub struct ActionInvocation<'a> {
-    contents: Vec<Word<'a>>,
+    contents: Filler<'a>,
     attached_invocations: Vec<ActionInvocation<'a>>,
 }
 
