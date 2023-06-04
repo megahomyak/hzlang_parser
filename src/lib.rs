@@ -6,32 +6,51 @@ pub enum Error {
     },
 }
 
-pub type Range = std::ops::Range<usize>;
+pub struct Filler<'a> {
+    words: Vec<Word<'a>>,
+}
 
-mod filler {
-    use crate::{Filler, Word};
+pub enum Word<'a> {
+    Raw(&'a str),
+}
 
-    pub struct Error {}
+pub struct ActionInvocation<'a> {
+    contents: Filler<'a>,
+    attached_invocations: Vec<ActionInvocation<'a>>,
+}
 
-    pub fn parse(words: &str) -> Result<Filler, Error> {
-        Ok(Filler {
-            words: words
-                .split_whitespace()
-                .map(|word| Word::Raw(word))
-                .collect(),
-        })
+fn parse_filler(words: &str) -> Filler {
+    Filler {
+        words: words
+            .split_whitespace()
+            .map(|word| Word::Raw(word))
+            .collect(),
     }
 }
 
 mod lines {
-    use crate::{filler, ActionInvocation, Range};
+    use super::*;
 
     pub enum Error {
         UnexpectedIndentation {
             line_index: usize,
             present_indentation_level: usize,
-            expected_indentation_levels_range: Range,
+            expected_indentation_levels_range: Vec<usize>,
         },
+    }
+
+    fn unindent(line: &str) -> (usize, &str) {
+        let mut indentation_level = 0;
+        loop {
+            line = line.trim_start_matches(char::is_whitespace);
+            line = match line.strip_prefix("-") {
+                None => return (indentation_level, line),
+                Some(line) => {
+                    indentation_level += 1;
+                    line
+                },
+            }
+        }
     }
 
     pub fn parse<'a>(
@@ -51,13 +70,11 @@ mod lines {
                         contents,
                         attached_invocations: Vec::new(),
                     })
-                },
-                Some(raw_line) => {
-                    raw_lines.peek().and_then(|(line_index, raw_line)| {
-                        let raw_line = raw_line.trim_start_matches(char::is_whitespace);
-                        raw_line.strip_prefix("-")
-                    })
                 }
+                Some(raw_line) => raw_lines.peek().and_then(|(line_index, raw_line)| {
+                    let raw_line = raw_line.trim_start_matches(char::is_whitespace);
+                    raw_line.strip_prefix("-")
+                }),
             }
         }
         let mut action_invocations = Vec::new();
@@ -72,19 +89,6 @@ mod lines {
         }
         todo!()
     }
-}
-
-pub struct Filler<'a> {
-    words: Vec<Word<'a>>,
-}
-
-pub enum Word<'a> {
-    Raw(&'a str),
-}
-
-pub struct ActionInvocation<'a> {
-    contents: Filler<'a>,
-    attached_invocations: Vec<ActionInvocation<'a>>,
 }
 
 pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
