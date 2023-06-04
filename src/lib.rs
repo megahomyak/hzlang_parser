@@ -56,38 +56,18 @@ mod lines {
     pub fn parse<'a>(
         raw_lines: impl Iterator<Item = &'a str>,
     ) -> Result<Vec<ActionInvocation<'a>>, Error> {
-        let mut raw_lines = raw_lines.enumerate().peekable();
-        let mut action_invocations = Vec::new();
-        for (line_index, raw_line) in raw_lines {
-            let raw_line = raw_line.trim_start_matches(char::is_whitespace);
-            match raw_line.strip_prefix("-") {
-                None => {
-                    let contents = match filler::parse(raw_line) {
-                        Ok(contents) => contents,
-                        Err(filler::Error {}) => unimplemented!(),
-                    };
-                    parsed_lines.push(ActionInvocation {
-                        contents,
-                        attached_invocations: Vec::new(),
-                    })
-                }
-                Some(raw_line) => raw_lines.peek().and_then(|(line_index, raw_line)| {
-                    let raw_line = raw_line.trim_start_matches(char::is_whitespace);
-                    raw_line.strip_prefix("-")
-                }),
-            }
+        struct Level<'a> {
+            indentation: usize,
+            lines: Filler<'a>,
         }
-        let mut action_invocations = Vec::new();
-        let Some((mut line_index, mut previous_line)) = raw_lines.next() else {
-            return Ok(action_invocations);
-        };
-        loop {
-            let Some((line_index, current_line)) = match raw_lines.next() {
-                Some(values) => values,
-                None => return Ok(action_invocations),
-            };
+
+        let mut root = Vec::new();
+        let mut current_level = &mut root;
+        for (line_index, raw_line) in raw_lines.enumerate() {
+            let (indentation_level, raw_line) = unindent(raw_line);
+            if indentation_level > 
         }
-        todo!()
+        return Ok(root);
     }
 }
 
