@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 fn unindent(mut line: &str) -> (usize, &str) {
     let mut level = 0;
     loop {
@@ -22,7 +24,7 @@ pub struct Line<'a> {
 pub enum Error {
     OverIndented {
         line_index: usize,
-        expected_indentations: Vec<usize>,
+        expected_indentations: HashSet<usize>,
         present_indentation: usize,
     },
 }
@@ -36,7 +38,7 @@ pub fn parse(program: &str) -> Result<Vec<Line<'_>>, Error> {
         if level != 0 && index == 0 {
             return Err(Error::OverIndented {
                 line_index: index,
-                expected_indentations: vec![0],
+                expected_indentations: HashSet::from([0]),
                 present_indentation: level,
             });
         }
@@ -60,9 +62,9 @@ pub fn parse(program: &str) -> Result<Vec<Line<'_>>, Error> {
             if next_level == level + 1 {
                 levels.push((&mut line.attached) as *mut _);
             } else if next_level > level {
-                let mut expected_indentations = vec![level, level + 1];
+                let mut expected_indentations = HashSet::from([level, level + 1]);
                 if level != 0 {
-                    expected_indentations.push(level - 1);
+                    expected_indentations.insert(level - 1);
                 }
                 return Err(Error::OverIndented {
                     line_index: *next_index,
@@ -114,7 +116,7 @@ mod tests {
             parse("-a"),
             Err(Error::OverIndented {
                 line_index: 0,
-                expected_indentations: vec![0],
+                expected_indentations: HashSet::from([0]),
                 present_indentation: 1
             })
         );
@@ -126,8 +128,20 @@ mod tests {
             parse("a\n--b"),
             Err(Error::OverIndented {
                 line_index: 1,
-                expected_indentations: vec![0, 1],
+                expected_indentations: HashSet::from([0, 1]),
                 present_indentation: 2
+            })
+        );
+    }
+
+    #[test]
+    fn parsing_an_incorrect_program_3() {
+        assert_eq!(
+            parse("a\n-b\n---c"),
+            Err(Error::OverIndented {
+                line_index: 2,
+                expected_indentations: HashSet::from([0, 1, 2]),
+                present_indentation: 3
             })
         );
     }
