@@ -15,9 +15,9 @@ fn unindent(mut line: &str) -> (usize, &str) {
 }
 
 #[derive(PartialEq, Eq, Debug)]
-pub struct Line<'a> {
-    pub contents: &'a str,
-    pub attached: Vec<Line<'a>>,
+pub struct ActionInvocation<'a> {
+    pub contents: Filler<'a>,
+    pub attached: Vec<ActionInvocation<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -29,10 +29,28 @@ pub enum Error {
     },
 }
 
-pub fn parse(program: &str) -> Result<Vec<Line<'_>>, Error> {
+#[derive(PartialEq, Eq, Debug)]
+pub enum Word<'a> {
+    Raw(&'a str),
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct Filler<'a> {
+    contents: Vec<Word<'a>>,
+}
+
+fn parse_filler(filler: &str) -> Filler {
+    let mut contents = Vec::new();
+    for word in filler.split_whitespace() {
+        contents.push(Word::Raw(word));
+    }
+    Filler { contents }
+}
+
+pub fn parse(program: &str) -> Result<Vec<ActionInvocation<'_>>, Error> {
     let mut program = program.lines().enumerate().peekable();
     let mut root = Vec::new();
-    let mut levels: Vec<*mut Vec<Line>> = Vec::new();
+    let mut levels: Vec<*mut Vec<ActionInvocation>> = Vec::new();
     while let Some((index, line)) = program.next() {
         let (level, unindented) = unindent(line);
         if level != 0 && index == 0 {
@@ -42,8 +60,8 @@ pub fn parse(program: &str) -> Result<Vec<Line<'_>>, Error> {
                 present_indentation: level,
             });
         }
-        let line = Line {
-            contents: unindented,
+        let line = ActionInvocation {
+            contents: parse_filler(unindented),
             attached: Vec::new(),
         };
         let line = match levels.iter_mut().rev().next() {
@@ -83,29 +101,34 @@ pub fn parse(program: &str) -> Result<Vec<Line<'_>>, Error> {
 }
 
 #[cfg(test)]
-#[cfg_attr(rustfmt, rustfmt_skip)]
 mod tests {
     use super::*;
 
-    fn line<'a>(contents: &'a str, attached: Vec<Line<'a>>) -> Line<'a> {
-        Line { attached, contents }
+    fn word<'a>(contents: &'a str, attached: Vec<ActionInvocation<'a>>) -> ActionInvocation<'a> {
+        ActionInvocation {
+            attached,
+            contents: Filler {
+                contents: Vec::from([Word::Raw(contents)]),
+            },
+        }
     }
 
     #[test]
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     fn correct_indentation() {
         assert_eq!(
             parse("a-d\n-b\n-  -   c\n  --d\ne"),
             Ok(vec![
-                line(
+                word(
                     "a-d",
                     vec![
-                        line("b", vec![
-                             line("c", vec![]),
-                             line("d", vec![])
+                        word("b", vec![
+                             word("c", vec![]),
+                             word("d", vec![])
                         ]),
                     ],
                 ),
-                line("e", vec![]),
+                word("e", vec![]),
             ])
         );
     }
