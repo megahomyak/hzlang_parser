@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_a_correct_program() {
+    fn correct_indentation() {
         assert_eq!(
             parse("a-d\n-b\n-  -   c\n  --d\ne"),
             Ok(vec![
@@ -111,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_an_incorrect_program() {
+    fn incorrect_indentation_1() {
         assert_eq!(
             parse("-a"),
             Err(Error::OverIndented {
@@ -123,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_an_incorrect_program_2() {
+    fn incorrect_indentation_2() {
         assert_eq!(
             parse("a\n--b"),
             Err(Error::OverIndented {
@@ -135,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_an_incorrect_program_3() {
+    fn incorrect_indentation_3() {
         assert_eq!(
             parse("a\n-b\n---c"),
             Err(Error::OverIndented {
