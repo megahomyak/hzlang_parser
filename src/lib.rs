@@ -1,89 +1,98 @@
-pub enum Error {
-    UnexpectedIndentation {
-        line_number: usize,
-        present_indentation: usize,
-        expected_indentation_levels: Vec<usize>,
-    },
+#[derive(Debug, PartialEq)]
+struct Node<'a> {
+    name: &'a str,
+    children: Vec<Node<'a>>,
 }
 
-pub struct Filler<'a> {
-    words: Vec<Word<'a>>,
-}
+fn parse_input(input: &str) -> Result<Vec<Node>, &'static str> {
+    let mut lines = input.lines().peekable();
+    let mut nodes = Vec::new();
 
-pub enum Word<'a> {
-    Raw(&'a str),
-}
+    while let Some(line) = lines.next() {
+        let (indent, rest) = count_indentation(line);
 
-pub struct ActionInvocation<'a> {
-    contents: Filler<'a>,
-    attached_invocations: Vec<ActionInvocation<'a>>,
-}
+        if let Some(next_line) = lines.peek() {
+            let (next_indent, next_rest) = count_indentation(next_line);
 
-fn parse_filler(words: &str) -> Filler {
-    Filler {
-        words: words
-            .split_whitespace()
-            .map(|word| Word::Raw(word))
-            .collect(),
+            if next_indent > indent + 1 {
+                return Err("Invalid indentation");
+            } else if next_indent == indent + 1 {
+                let node = Node {
+                    name: rest.trim(),
+                    children: parse_children(&mut lines)?,
+                };
+                nodes.push(node);
+            } else {
+                let node = Node {
+                    name: rest.trim(),
+                    children: Vec::new(),
+                };
+                nodes.push(node);
+            }
+        } else {
+            let node = Node {
+                name: rest.trim(),
+                children: Vec::new(),
+            };
+            nodes.push(node);
+        }
     }
+
+    Ok(nodes)
 }
 
-mod lines {
-    use super::*;
-
-    pub enum Error {
-        UnexpectedIndentation {
-            line_index: usize,
-            present_indentation_level: usize,
-            expected_indentation_levels_range: Vec<usize>,
-        },
-    }
-
-    fn unindent(line: &str) -> (usize, &str) {
-        let mut indentation_level = 0;
-        loop {
-            line = line.trim_start_matches(char::is_whitespace);
-            line = match line.strip_prefix("-") {
-                None => return (indentation_level, line),
-                Some(line) => {
-                    indentation_level += 1;
-                    line
-                },
+fn count_indentation(mut line: &str) -> (usize, &str) {
+    let mut counter = 0;
+    loop {
+        match line
+            .trim_start_matches(char::is_whitespace)
+            .strip_prefix("-")
+        {
+            None => return (counter, line),
+            Some(new_line) => {
+                line = new_line;
+                counter += 1;
             }
         }
     }
-
-    pub fn parse<'a>(
-        raw_lines: impl Iterator<Item = &'a str>,
-    ) -> Result<Vec<ActionInvocation<'a>>, Error> {
-        struct Level<'a> {
-            indentation: usize,
-            lines: Filler<'a>,
-        }
-
-        let mut root = Vec::new();
-        let mut current_level = &mut root;
-        for (line_index, raw_line) in raw_lines.enumerate() {
-            let (indentation_level, raw_line) = unindent(raw_line);
-            if indentation_level > 
-        }
-        return Ok(root);
-    }
 }
 
-pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
-    match lines::parse(program.split("\n")) {
-        Ok(lines) => Ok(lines),
-        Err(error) => Err(match error {
-            lines::Error::UnexpectedIndentation {
-                line_index,
-                present_indentation_level: present_indentation,
-            } => Error::UnexpectedIndentation {
-                line_number: line_index + 1,
-                present_indentation,
-            },
-        }),
+fn parse_children<'a>(
+    lines: &mut std::iter::Peekable<impl Iterator<Item = &'a str>>,
+) -> Result<Vec<Node<'a>>, &'static str> {
+    let mut nodes = Vec::new();
+
+    while let Some(line) = lines.next() {
+        let (indent, rest) = count_indentation(line);
+
+        if let Some(next_line) = lines.peek() {
+            let (next_indent, next_rest) = count_indentation(next_line);
+
+            if next_indent > indent + 1 {
+                return Err("Invalid indentation");
+            } else if next_indent == indent + 1 {
+                let node = Node {
+                    name: rest.trim(),
+                    children: parse_children(lines)?,
+                };
+                nodes.push(node);
+            } else {
+                let node = Node {
+                    name: rest.trim(),
+                    children: Vec::new(),
+                };
+                nodes.push(node);
+            }
+        } else {
+            let node = Node {
+                name: rest.trim(),
+                children: Vec::new(),
+            };
+            nodes.push(node);
+        }
     }
+
+    Ok(nodes)
 }
 
 #[cfg(test)]
@@ -91,8 +100,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn test_parse_input() {
+        let input = "a\n- b\n- c\n- - d\ne";
+        let expected = vec![
+            Node {
+                name: "a",
+                children: vec![
+                    Node {
+                        name: "b",
+                        children: vec![],
+                    },
+                    Node {
+                        name: "c",
+                        children: vec![Node {
+                            name: "d",
+                            children: vec![],
+                        }],
+                    },
+                ],
+            },
+            Node {
+                name: "e",
+                children: vec![],
+            },
+        ];
+        assert_eq!(parse_input(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_parse_input_invalid_indentation() {
+        let input = "a\n- - b";
+        assert_eq!(parse_input(input), Err("Invalid indentation"));
+    }
+
+    #[test]
+    fn test_parse_input_empty_input() {
+        let input = "";
+        let expected: Vec<Node> = Vec::new();
+        assert_eq!(parse_input(input).unwrap(), expected);
     }
 }
