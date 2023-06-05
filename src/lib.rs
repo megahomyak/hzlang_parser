@@ -104,12 +104,13 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation<'_>>, Error> {
 mod tests {
     use super::*;
 
-    fn word<'a>(contents: &'a str, attached: Vec<ActionInvocation<'a>>) -> ActionInvocation<'a> {
+    fn line<'a>(
+        contents: Vec<Word<'a>>,
+        attached: Vec<ActionInvocation<'a>>,
+    ) -> ActionInvocation<'a> {
         ActionInvocation {
             attached,
-            contents: Filler {
-                contents: Vec::from([Word::Raw(contents)]),
-            },
+            contents: Filler { contents },
         }
     }
 
@@ -119,16 +120,16 @@ mod tests {
         assert_eq!(
             parse("a-d\n-b\n-  -   c\n  --d\ne"),
             Ok(vec![
-                word(
-                    "a-d",
+                line(
+                    Vec::from([Word::Raw("a-d")]),
                     vec![
-                        word("b", vec![
-                             word("c", vec![]),
-                             word("d", vec![])
+                        line(Vec::from([Word::Raw("b")]), vec![
+                             line(Vec::from([Word::Raw("c")]), vec![]),
+                             line(Vec::from([Word::Raw("d")]), vec![])
                         ]),
                     ],
                 ),
-                word("e", vec![]),
+                line(Vec::from([Word::Raw("e")]), vec![]),
             ])
         );
     }
