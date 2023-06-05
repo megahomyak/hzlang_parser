@@ -20,7 +20,11 @@ pub struct Line<'a> {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
-    OverIndented,
+    OverIndented {
+        line_index: usize,
+        expected_indentations: Vec<usize>,
+        present_indentation: usize,
+    },
 }
 
 pub fn parse(program: &str) -> Result<Vec<Line<'_>>, Error> {
@@ -29,6 +33,13 @@ pub fn parse(program: &str) -> Result<Vec<Line<'_>>, Error> {
     let mut levels: Vec<*mut Vec<Line>> = Vec::new();
     while let Some((index, line)) = program.next() {
         let (level, unindented) = unindent(line);
+        if level != 0 && index == 0 {
+            return Err(Error::OverIndented {
+                line_index: index,
+                expected_indentations: vec![0],
+                present_indentation: level,
+            });
+        }
         let line = Line {
             contents: unindented,
             attached: Vec::new(),
@@ -49,7 +60,15 @@ pub fn parse(program: &str) -> Result<Vec<Line<'_>>, Error> {
             if next_level == level + 1 {
                 levels.push((&mut line.attached) as *mut _);
             } else if next_level > level {
-                return Err(Error::OverIndented);
+                let mut expected_indentations = vec![level, level + 1];
+                if level != 0 {
+                    expected_indentations.push(level - 1);
+                }
+                return Err(Error::OverIndented {
+                    line_index: index,
+                    present_indentation: next_level,
+                    expected_indentations,
+                });
             } else if next_level != level {
                 let rollback = level - next_level;
                 for _ in 0..rollback {
@@ -71,7 +90,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing() {
+    fn parsing_a_correct_program() {
         assert_eq!(
             parse("a\n-b\n-  -   c\n  --d\ne"),
             Ok(vec![
@@ -86,6 +105,18 @@ mod tests {
                 ),
                 line("e", vec![]),
             ])
+        );
+    }
+
+    #[test]
+    fn parsing_an_incorrect_program() {
+        assert_eq!(
+            parse("-a"),
+            Err(Error::OverIndented {
+                line_index: 0,
+                expected_indentations: vec![0],
+                present_indentation: 1
+            })
         );
     }
 }
