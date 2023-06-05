@@ -55,7 +55,7 @@ pub fn parse(program: &str) -> Result<Vec<Line<'_>>, Error> {
                 root.last_mut().unwrap()
             }
         };
-        if let Some((_next_index, next_line)) = program.peek() {
+        if let Some((next_index, next_line)) = program.peek() {
             let (next_level, _next_unindented) = unindent(next_line);
             if next_level == level + 1 {
                 levels.push((&mut line.attached) as *mut _);
@@ -65,7 +65,7 @@ pub fn parse(program: &str) -> Result<Vec<Line<'_>>, Error> {
                     expected_indentations.push(level - 1);
                 }
                 return Err(Error::OverIndented {
-                    line_index: index,
+                    line_index: *next_index,
                     present_indentation: next_level,
                     expected_indentations,
                 });
@@ -92,10 +92,10 @@ mod tests {
     #[test]
     fn parsing_a_correct_program() {
         assert_eq!(
-            parse("a\n-b\n-  -   c\n  --d\ne"),
+            parse("a-d\n-b\n-  -   c\n  --d\ne"),
             Ok(vec![
                 line(
-                    "a",
+                    "a-d",
                     vec![
                         line("b", vec![
                              line("c", vec![]),
@@ -116,6 +116,18 @@ mod tests {
                 line_index: 0,
                 expected_indentations: vec![0],
                 present_indentation: 1
+            })
+        );
+    }
+
+    #[test]
+    fn parsing_an_incorrect_program_2() {
+        assert_eq!(
+            parse("a\n--b"),
+            Err(Error::OverIndented {
+                line_index: 1,
+                expected_indentations: vec![0, 1],
+                present_indentation: 2
             })
         );
     }
