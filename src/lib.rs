@@ -1,142 +1,91 @@
-#[derive(Debug, PartialEq)]
-struct Node<'a> {
-    name: &'a str,
-    children: Vec<Node<'a>>,
-}
-
-fn parse_input(input: &str) -> Result<Vec<Node>, &'static str> {
-    let mut lines = input.lines().peekable();
-    let mut nodes = Vec::new();
-
-    while let Some(line) = lines.next() {
-        let (indent, rest) = count_indentation(line);
-
-        if let Some(next_line) = lines.peek() {
-            let (next_indent, next_rest) = count_indentation(next_line);
-
-            if next_indent > indent + 1 {
-                return Err("Invalid indentation");
-            } else if next_indent == indent + 1 {
-                let node = Node {
-                    name: rest.trim(),
-                    children: parse_children(&mut lines)?,
-                };
-                nodes.push(node);
-            } else {
-                let node = Node {
-                    name: rest.trim(),
-                    children: Vec::new(),
-                };
-                nodes.push(node);
-            }
-        } else {
-            let node = Node {
-                name: rest.trim(),
-                children: Vec::new(),
-            };
-            nodes.push(node);
-        }
-    }
-
-    Ok(nodes)
-}
-
-fn count_indentation(mut line: &str) -> (usize, &str) {
-    let mut counter = 0;
+fn unindent(mut line: &str) -> (usize, &str) {
+    let mut level = 0;
     loop {
-        match line
-            .trim_start_matches(char::is_whitespace)
-            .strip_prefix("-")
-        {
-            None => return (counter, line),
-            Some(new_line) => {
-                line = new_line;
-                counter += 1;
+        line = line.trim_start_matches(char::is_whitespace);
+        line = match line.strip_prefix("-") {
+            Some(line) => {
+                level += 1;
+                line
             }
+            None => break (level, line),
         }
     }
 }
 
-fn parse_children<'a>(
-    lines: &mut std::iter::Peekable<impl Iterator<Item = &'a str>>,
-) -> Result<Vec<Node<'a>>, &'static str> {
-    let mut nodes = Vec::new();
+#[derive(PartialEq, Eq, Debug)]
+pub struct Line<'a> {
+    pub contents: &'a str,
+    pub attached: Vec<Line<'a>>,
+}
 
-    while let Some(line) = lines.next() {
-        let (indent, rest) = count_indentation(line);
+#[derive(Debug, PartialEq, Eq)]
+pub enum Error {
+    OverIndented,
+}
 
-        if let Some(next_line) = lines.peek() {
-            let (next_indent, next_rest) = count_indentation(next_line);
-
-            if next_indent > indent + 1 {
-                return Err("Invalid indentation");
-            } else if next_indent == indent + 1 {
-                let node = Node {
-                    name: rest.trim(),
-                    children: parse_children(lines)?,
-                };
-                nodes.push(node);
-            } else {
-                let node = Node {
-                    name: rest.trim(),
-                    children: Vec::new(),
-                };
-                nodes.push(node);
+pub fn parse(program: &str) -> Result<Vec<Line<'_>>, Error> {
+    let mut program = program.lines().enumerate().peekable();
+    let mut root = Vec::new();
+    let mut levels: Vec<*mut Vec<Line>> = Vec::new();
+    while let Some((index, line)) = program.next() {
+        let (level, unindented) = unindent(line);
+        let line = Line {
+            contents: unindented,
+            attached: Vec::new(),
+        };
+        let line = match levels.iter_mut().rev().next() {
+            Some(level) => {
+                let level: &mut _ = unsafe { &mut **level };
+                level.push(line);
+                level.last_mut().unwrap()
             }
-        } else {
-            let node = Node {
-                name: rest.trim(),
-                children: Vec::new(),
-            };
-            nodes.push(node);
+            None => {
+                root.push(line);
+                root.last_mut().unwrap()
+            }
+        };
+        if let Some((_next_index, next_line)) = program.peek() {
+            let (next_level, _next_unindented) = unindent(next_line);
+            if next_level == level + 1 {
+                levels.push((&mut line.attached) as *mut _);
+            } else if next_level > level {
+                return Err(Error::OverIndented);
+            } else if next_level != level {
+                let rollback = level - next_level;
+                for _ in 0..rollback {
+                    levels.pop().unwrap();
+                }
+            }
         }
     }
-
-    Ok(nodes)
+    Ok(root)
 }
 
 #[cfg(test)]
+#[cfg_attr(rustfmt, rustfmt_skip)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_parse_input() {
-        let input = "a\n- b\n- c\n- - d\ne";
-        let expected = vec![
-            Node {
-                name: "a",
-                children: vec![
-                    Node {
-                        name: "b",
-                        children: vec![],
-                    },
-                    Node {
-                        name: "c",
-                        children: vec![Node {
-                            name: "d",
-                            children: vec![],
-                        }],
-                    },
-                ],
-            },
-            Node {
-                name: "e",
-                children: vec![],
-            },
-        ];
-        assert_eq!(parse_input(input).unwrap(), expected);
+    fn line<'a>(contents: &'a str, attached: Vec<Line<'a>>) -> Line<'a> {
+        Line { attached, contents }
     }
 
     #[test]
-    fn test_parse_input_invalid_indentation() {
-        let input = "a\n- - b";
-        assert_eq!(parse_input(input), Err("Invalid indentation"));
-    }
-
-    #[test]
-    fn test_parse_input_empty_input() {
-        let input = "";
-        let expected: Vec<Node> = Vec::new();
-        assert_eq!(parse_input(input).unwrap(), expected);
+    fn parsing() {
+        assert_eq!(
+            parse("a\n-b\n-  -   c\n  --d\ne"),
+            Ok(vec![
+                line(
+                    "a",
+                    vec![
+                        line("b", vec![
+                             line("c", vec![]),
+                             line("d", vec![])
+                        ]),
+                    ],
+                ),
+                line("e", vec![]),
+            ])
+        );
     }
 }
