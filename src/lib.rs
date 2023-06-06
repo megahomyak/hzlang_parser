@@ -27,19 +27,62 @@ pub enum Error {
         expected_indentations: HashSet<usize>,
         present_indentation: usize,
     },
+    UnclosedQuote,
+    UnexpectedCharacterEscaped,
 }
 
 #[derive(PartialEq, Eq, Debug)]
-pub enum Word {
-    Raw(String),
+pub enum NamePart {
+    Word(String),
+    String(String),
 }
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct Filler {
-    contents: Vec<Word>,
+    contents: Vec<NamePart>,
 }
 
-fn parse_filler(filler: &str) -> Filler {
+fn parse_string(string: &str) -> Result<(String, &str), Error> {
+    let mut result = String::new();
+    let mut string = string.chars();
+    while let Some(c) = string.next() {
+        match c {
+            '\\' => match string.next() {
+                None => return Err(Error::UnclosedQuote),
+                Some(c @ ('\\' | '"')) => result.push(c),
+                Some(_) => return Err(Error::UnexpectedCharacterEscaped),
+            },
+            '"' => {
+                result.shrink_to_fit();
+                return Ok((result, string.as_str()));
+            }
+            _ => result.push(c),
+        }
+    }
+    Err(Error::UnclosedQuote)
+}
+
+fn parse_word(mut rest: &str) -> Result<(String, &str), Error> {
+
+}
+
+fn parse_filler(filler: &str) -> Result<(Filler, Option<Error>), Error> {
+    let mut filler = filler.chars();
+    let mut contents = Vec::new();
+    while let Some(c) = filler.next() {
+        match c {
+            '"' => {
+                let (result, rest) = parse_string(filler.as_str())?;
+                contents.push(Word::String(result));
+            }
+            '{' => {
+                let (result, rest) = parse_filler(filler.as_str())?;
+            }
+            _ if c.is_whitespace() => {
+
+            }
+        }
+    }
     let mut contents = Vec::new();
     for word in filler.split_whitespace() {
         contents.push(Word::Raw(word.to_owned()));
@@ -61,7 +104,7 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
             });
         }
         let line = ActionInvocation {
-            contents: parse_filler(unindented),
+            contents: parse_filler(unindented)?,
             attached: Vec::new(),
         };
         let line = match levels.iter_mut().rev().next() {
@@ -169,5 +212,25 @@ mod tests {
                 present_indentation: 3
             })
         );
+    }
+
+    #[test]
+    fn correct_string() {
+
+    }
+
+    #[test]
+    fn incorrect_string_1() {
+
+    }
+
+    #[test]
+    fn incorrect_string_2() {
+
+    }
+
+    #[test]
+    fn incorrect_string_3() {
+
     }
 }
