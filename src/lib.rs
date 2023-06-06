@@ -35,6 +35,7 @@ pub enum Error {
 pub enum NamePart {
     Word(String),
     String(String),
+    Filler(Filler),
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -42,15 +43,35 @@ pub struct Filler {
     contents: Vec<NamePart>,
 }
 
-fn parse_string(string: &str) -> Result<(String, &str), Error> {
+fn until<T, F: Fn(char) -> Option<T>>(s: &str, checker: F) -> Option<(&str, T, &str)> {
+    let mut char_indices = s.char_indices();
+    for (i, c) in char_indices {
+        if let Some(output) = checker(c) {
+            return Some((&s[..i], output, char_indices.as_str()));
+        }
+    }
+    return None;
+}
+
+fn skip_whitespace(rest: &str) -> Option<(char, &str)> {
+    match until(rest, |c| (!c.is_whitespace()).then(|| c)) {
+        None => (""),
+        Some((_whitespaces, c, rest)) => (c, rest),
+    }
+}
+
+fn parse_string(rest: &str) -> Result<(String, &str), Option<Error>> {
+    let Some((_, '"', rest)) = until(rest, |c| (!c.is_whitespace()).then(|| c)) else {
+        return Err(None);
+    };
     let mut result = String::new();
-    let mut string = string.chars();
+    let mut string = rest.chars();
     while let Some(c) = string.next() {
         match c {
             '\\' => match string.next() {
-                None => return Err(Error::UnclosedQuote),
+                None => return Err(Some(Error::UnclosedQuote)),
                 Some(c @ ('\\' | '"')) => result.push(c),
-                Some(_) => return Err(Error::UnexpectedCharacterEscaped),
+                Some(_) => return Err(Some(Error::UnexpectedCharacterEscaped)),
             },
             '"' => {
                 result.shrink_to_fit();
@@ -59,28 +80,60 @@ fn parse_string(string: &str) -> Result<(String, &str), Error> {
             _ => result.push(c),
         }
     }
-    Err(Error::UnclosedQuote)
+    Err(Some(Error::UnclosedQuote))
 }
 
-fn parse_word(mut rest: &str) -> Result<(String, &str), Error> {
-
+enum Token {
+    OpeningBrace,
+    ClosingBrace,
+    OpeningBracket,
+    ClosingBracket,
+    OpeningParen,
+    ClosingParen,
+    Quote,
+    Whitespace,
+    Other(char),
 }
 
-fn parse_filler(filler: &str) -> Result<(Filler, Option<Error>), Error> {
+impl From<char> for Token {
+    fn from(value: char) -> Self {
+        match value {
+            '(' => Self::OpeningParen,
+            ')' => Self::ClosingParen,
+            ']' => Self::ClosingBracket,
+            '[' => Self::OpeningBracket,
+            '{' => Self::OpeningBrace,
+            '}' => Self::ClosingBrace,
+            '"' => Self::Quote,
+            c if c.is_whitespace() => Self::Whitespace,
+            c => Self::Other(c),
+        }
+    }
+}
+
+fn parse_word(rest: &str) -> Result<(String, Token, &str), Option<Error>> {
+    let Some((_, Token::Other(c), rest)) =
+        until(rest, |c| (!c.is_whitespace()).then(|| c.into())) else {
+            return Err(None);
+    };
+    let mut word = String::from(c);
+    let Some((word_rest, token, rest)) =
+        until(rest, |c| if let Token::Other(c) = c.into() { Some(c) } else { None })
+}
+
+fn parse_filler(filler: &str) -> Result<(Filler, &str), Error> {
     let mut filler = filler.chars();
     let mut contents = Vec::new();
     while let Some(c) = filler.next() {
         match c {
             '"' => {
                 let (result, rest) = parse_string(filler.as_str())?;
-                contents.push(Word::String(result));
+                contents.push(NamePart::String(result));
             }
             '{' => {
-                let (result, rest) = parse_filler(filler.as_str())?;
+                let (result, rest) = parse_word(filler.as_str())?;
             }
-            _ if c.is_whitespace() => {
-
-            }
+            _ if c.is_whitespace() => {}
         }
     }
     let mut contents = Vec::new();
@@ -147,15 +200,15 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
 mod tests {
     use super::*;
 
-    fn line(contents: Vec<Word>, attached: Vec<ActionInvocation>) -> ActionInvocation {
+    fn line(contents: Vec<NamePart>, attached: Vec<ActionInvocation>) -> ActionInvocation {
         ActionInvocation {
             attached,
             contents: Filler { contents },
         }
     }
 
-    fn raw(word: &str) -> Word {
-        Word::Raw(word.to_owned())
+    fn word(word: &str) -> NamePart {
+        NamePart::Word(word.to_owned())
     }
 
     #[test]
@@ -165,15 +218,15 @@ mod tests {
             parse("a-d\n-b\n-  -   c\n  --d\ne"),
             Ok(vec![
                 line(
-                    Vec::from([raw("a-d")]),
+                    Vec::from([word("a-d")]),
                     vec![
-                        line(Vec::from([raw("b")]), vec![
-                             line(Vec::from([raw("c")]), vec![]),
-                             line(Vec::from([raw("d")]), vec![])
+                        line(Vec::from([word("b")]), vec![
+                             line(Vec::from([word("c")]), vec![]),
+                             line(Vec::from([word("d")]), vec![])
                         ]),
                     ],
                 ),
-                line(Vec::from([raw("e")]), vec![]),
+                line(Vec::from([word("e")]), vec![]),
             ])
         );
     }
@@ -215,22 +268,14 @@ mod tests {
     }
 
     #[test]
-    fn correct_string() {
-
-    }
+    fn correct_string() {}
 
     #[test]
-    fn incorrect_string_1() {
-
-    }
+    fn incorrect_string_1() {}
 
     #[test]
-    fn incorrect_string_2() {
-
-    }
+    fn incorrect_string_2() {}
 
     #[test]
-    fn incorrect_string_3() {
-
-    }
+    fn incorrect_string_3() {}
 }
