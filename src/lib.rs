@@ -32,6 +32,9 @@ pub enum Error {
     UnclosedQuote,
     UnexpectedCharacterEscaped,
     WordInsideList,
+    UnclosedParen,
+    UnclosedBracket,
+    UnclosedBrace,
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -46,10 +49,16 @@ pub struct Name {
 }
 
 #[derive(PartialEq, Eq, Debug)]
+pub struct Dict {
+    pub contents: Vec<(Filler, Filler)>,
+}
+
+#[derive(PartialEq, Eq, Debug)]
 pub enum Filler {
     String(HzString),
     Name(Name),
     List(List),
+    Dict(Dict),
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -133,6 +142,11 @@ fn parse_filler(rest: &str) -> ParsingResult<Filler> {
         .map(|string| Filler::String(string))
         .or(|| parse_braced_name(rest).map(|filler| Filler::Name(filler)))
         .or(|| parse_list(rest).map(|list| Filler::List(list)))
+        .or(|| parse_dict(rest).map(|dict| Filler::Dict(dict)))
+}
+
+fn parse_dict(rest: &str) -> ParsingResult<Dict> {
+    todo!()
 }
 
 fn parse_name(rest: &str) -> ParsingResult<Name> {
@@ -146,10 +160,16 @@ fn parse_list(rest: &str) -> ParsingResult<List> {
     };
     loop {
         rest = skip_whitespace(rest);
-        match parse_filler(rest) {
-            ParsingResult::Ok((filler, rest)) => ,
+        rest = match parse_filler(rest) {
+            ParsingResult::Ok((filler, rest)) => {
+                contents.push(filler);
+                rest
+            },
             ParsingResult::Err => {
                 rest = skip_whitespace(rest);
+                match rest.take_one_part() {
+                    None => 
+                }
             },
             ParsingResult::Fatal(error) => return ParsingResult::Fatal(error),
         }
