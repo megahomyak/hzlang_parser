@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use parco::Rest;
+use parco::{Input, Rest};
 
 fn unindent(mut line: &str) -> (usize, &str) {
     let mut level = 0;
@@ -37,9 +37,7 @@ pub enum Error {
 #[derive(PartialEq, Eq, Debug)]
 pub enum NamePart {
     Word(String),
-    String(HzString),
-    Name(Name),
-    List(List),
+    Filler(Filler),
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -48,7 +46,7 @@ pub struct Name {
 }
 
 #[derive(PartialEq, Eq, Debug)]
-pub enum ListPart {
+pub enum Filler {
     String(HzString),
     Name(Name),
     List(List),
@@ -56,7 +54,7 @@ pub enum ListPart {
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct List {
-    pub contents: Vec<ListPart>,
+    pub contents: Vec<Filler>,
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -99,9 +97,7 @@ fn parse_string(rest: &str) -> ParsingResult<HzString> {
                 contents.shrink_to_fit();
                 return ParsingResult::Ok((raw, Rest(rest.as_str())));
             }
-            '{' => {
-
-            }
+            '{' => {}
             _ => raw.push(c),
         }
     }
@@ -126,13 +122,17 @@ fn parse_braced_name(rest: &str) -> ParsingResult<Name> {
     todo!()
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
 fn parse_name_part(rest: &str) -> ParsingResult<NamePart> {
-    rest = skip_whitespace(rest);
-    parse_word(rest).map(|word| NamePart::Word(word))
-        .or(|| parse_string(rest).map(|string| NamePart::String(string)))
-        .or(|| parse_braced_name(rest).map(|filler| NamePart::Name(filler)))
-        .or(|| parse_list(rest).map(|list| NamePart::List(list)))
+    parse_word(rest)
+        .map(|word| NamePart::Word(word))
+        .or(|| parse_filler(rest).map(|filler| NamePart::Filler(filler)))
+}
+
+fn parse_filler(rest: &str) -> ParsingResult<Filler> {
+    parse_string(rest)
+        .map(|string| Filler::String(string))
+        .or(|| parse_braced_name(rest).map(|filler| Filler::Name(filler)))
+        .or(|| parse_list(rest).map(|list| Filler::List(list)))
 }
 
 fn parse_name(rest: &str) -> ParsingResult<Name> {
@@ -141,18 +141,17 @@ fn parse_name(rest: &str) -> ParsingResult<Name> {
 
 fn parse_list(rest: &str) -> ParsingResult<List> {
     let mut contents = Vec::new();
-    let rest = {
-        let mut chars = rest.chars();
-        let Some('(') = chars.next() else {
-            return ParsingResult::Err;
-        };
-        chars.as_str()
+    let Some(('(', Rest(rest))) = rest.take_one_part() else {
+        return ParsingResult::Err;
     };
     loop {
         rest = skip_whitespace(rest);
-        match parse_name_part(rest) {
-            ParsingResult::Ok((name_part, rest)) => match name_part {},
-            ParsingResult::Err => 
+        match parse_filler(rest) {
+            ParsingResult::Ok((filler, rest)) => ,
+            ParsingResult::Err => {
+                rest = skip_whitespace(rest);
+            },
+            ParsingResult::Fatal(error) => return ParsingResult::Fatal(error),
         }
     }
 }
