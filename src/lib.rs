@@ -15,110 +15,39 @@ fn unindent(mut line: &str) -> (usize, &str) {
 }
 
 #[derive(PartialEq, Eq, Debug)]
-pub struct ActionInvocation<'a> {
-    pub contents: Filler<'a>,
-    pub attached: Vec<ActionInvocation<'a>>,
+pub struct ActionInvocation {
+    pub contents: Filler,
+    pub attached: Vec<ActionInvocation>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum ErrorKind {
+pub enum Error {
     OverIndented {
+        line_index: usize,
         expected_indentations: HashSet<usize>,
         present_indentation: usize,
     },
-    UnknownCharacterEscaped {
-        character: char,
-    },
-    UnclosedQuote,
-    EscapeCharacterBeforeTheEndOfTheLine,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Error {
-    line_index: usize,
-    kind: ErrorKind,
 }
 
 #[derive(PartialEq, Eq, Debug)]
-pub enum StringPart<'a> {
-    Raw(&'a str),
-    EscapedChar(char),
+pub enum Word {
+    Raw(String),
 }
 
 #[derive(PartialEq, Eq, Debug)]
-pub struct String<'a> {
-    parts: Vec<StringPart<'a>>,
+pub struct Filler {
+    contents: Vec<Word>,
 }
 
-#[derive(PartialEq, Eq, Debug)]
-pub enum Word<'a> {
-    Raw(&'a str),
-    String(String<'a>),
-}
-
-#[derive(PartialEq, Eq, Debug)]
-pub struct Filler<'a> {
-    contents: Vec<Word<'a>>,
-}
-
-fn take_until<T, F: Fn(char) -> Option<T>>(string: &str, checker: F) -> (&str, Option<T>, &str) {
-    let chars = string.char_indices();
-    for (i, c) in chars {
-        match checker(c) {
-            None => (),
-            Some(output) => return (&string[..i], Some(output), &string[i..]),
-        }
-    }
-    (string, None, "")
-}
-
-fn bite(s: &str) -> (Option<char>, &str) {
-    let chars = s.chars();
-    (chars.next(), chars.as_str())
-}
-
-fn parse_string(string: &str) -> Result<(String<'_>, &str), ErrorKind> {
-    let mut parts = Vec::new();
-    loop {
-        enum Stop {
-            Quote,
-            EscapeChar,
-        }
-        let (result, Some(stop), rest) = take_until(string, |c| match c {
-            '\\' => Some(Stop::EscapeChar),
-            '"' => Some(Stop::Quote),
-            _ => None,
-        }) else {
-            return Err(ErrorKind::UnclosedQuote);
-        };
-        string = rest;
-        match stop {
-            Stop::EscapeChar => {
-                let (c, rest) = bite(rest);
-                match c {
-                    None => return Err(ErrorKind::EscapeCharacterBeforeTheEndOfTheLine),
-                    Some(c) => {
-                        if !['\\', '"'].contains(&c) {
-                            return Err(ErrorKind::UnknownCharacterEscaped { character: c });
-                        }
-                        parts.push(StringPart::EscapedChar(c));
-                    }
-                }
-            }
-            Stop::Quote => return Ok((String { parts }, string)),
-        }
-        todo!()
-    }
-}
-
-fn parse_filler(filler: &str) -> Result<Filler, Error> {
+fn parse_filler(filler: &str) -> Filler {
     let mut contents = Vec::new();
-    let chars = filler.char_indices().peekable();
-    todo!();
-    Ok(Filler { contents })
+    for word in filler.split_whitespace() {
+        contents.push(Word::Raw(word.to_owned()));
+    }
+    Filler { contents }
 }
 
-pub fn parse(program: &str) -> Result<Vec<ActionInvocation<'_>>, Error> {
+pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
     let mut program = program.lines().enumerate().peekable();
     let mut root = Vec::new();
     let mut levels: Vec<*mut Vec<ActionInvocation>> = Vec::new();
@@ -132,7 +61,7 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation<'_>>, Error> {
             });
         }
         let line = ActionInvocation {
-            contents: parse_filler(unindented)?,
+            contents: parse_filler(unindented),
             attached: Vec::new(),
         };
         let line = match levels.iter_mut().rev().next() {
@@ -175,14 +104,15 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation<'_>>, Error> {
 mod tests {
     use super::*;
 
-    fn line<'a>(
-        contents: Vec<Word<'a>>,
-        attached: Vec<ActionInvocation<'a>>,
-    ) -> ActionInvocation<'a> {
+    fn line(contents: Vec<Word>, attached: Vec<ActionInvocation>) -> ActionInvocation {
         ActionInvocation {
             attached,
             contents: Filler { contents },
         }
+    }
+
+    fn raw(word: &str) -> Word {
+        Word::Raw(word.to_owned())
     }
 
     #[test]
@@ -192,15 +122,15 @@ mod tests {
             parse("a-d\n-b\n-  -   c\n  --d\ne"),
             Ok(vec![
                 line(
-                    Vec::from([Word::Raw("a-d")]),
+                    Vec::from([raw("a-d")]),
                     vec![
-                        line(Vec::from([Word::Raw("b")]), vec![
-                             line(Vec::from([Word::Raw("c")]), vec![]),
-                             line(Vec::from([Word::Raw("d")]), vec![])
+                        line(Vec::from([raw("b")]), vec![
+                             line(Vec::from([raw("c")]), vec![]),
+                             line(Vec::from([raw("d")]), vec![])
                         ]),
                     ],
                 ),
-                line(Vec::from([Word::Raw("e")]), vec![]),
+                line(Vec::from([raw("e")]), vec![]),
             ])
         );
     }
