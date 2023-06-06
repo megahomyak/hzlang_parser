@@ -21,17 +21,39 @@ pub struct ActionInvocation<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Error {
+pub enum ErrorKind {
     OverIndented {
-        line_index: usize,
         expected_indentations: HashSet<usize>,
         present_indentation: usize,
     },
+    UnknownCharacterEscaped {
+        character: char,
+    },
+    UnclosedQuote,
+    EscapeCharacterBeforeTheEndOfTheLine,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Error {
+    line_index: usize,
+    kind: ErrorKind,
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub enum StringPart<'a> {
+    Raw(&'a str),
+    EscapedChar(char),
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct String<'a> {
+    parts: Vec<StringPart<'a>>,
 }
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum Word<'a> {
     Raw(&'a str),
+    String(String<'a>),
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -39,12 +61,61 @@ pub struct Filler<'a> {
     contents: Vec<Word<'a>>,
 }
 
-fn parse_filler(filler: &str) -> Filler {
-    let mut contents = Vec::new();
-    for word in filler.split_whitespace() {
-        contents.push(Word::Raw(word));
+fn take_until<T, F: Fn(char) -> Option<T>>(string: &str, checker: F) -> (&str, Option<T>, &str) {
+    let chars = string.char_indices();
+    for (i, c) in chars {
+        match checker(c) {
+            None => (),
+            Some(output) => return (&string[..i], Some(output), &string[i..]),
+        }
     }
-    Filler { contents }
+    (string, None, "")
+}
+
+fn bite(s: &str) -> (Option<char>, &str) {
+    let chars = s.chars();
+    (chars.next(), chars.as_str())
+}
+
+fn parse_string(string: &str) -> Result<(String<'_>, &str), ErrorKind> {
+    let mut parts = Vec::new();
+    loop {
+        enum Stop {
+            Quote,
+            EscapeChar,
+        }
+        let (result, Some(stop), rest) = take_until(string, |c| match c {
+            '\\' => Some(Stop::EscapeChar),
+            '"' => Some(Stop::Quote),
+            _ => None,
+        }) else {
+            return Err(ErrorKind::UnclosedQuote);
+        };
+        string = rest;
+        match stop {
+            Stop::EscapeChar => {
+                let (c, rest) = bite(rest);
+                match c {
+                    None => return Err(ErrorKind::EscapeCharacterBeforeTheEndOfTheLine),
+                    Some(c) => {
+                        if !['\\', '"'].contains(&c) {
+                            return Err(ErrorKind::UnknownCharacterEscaped { character: c });
+                        }
+                        parts.push(StringPart::EscapedChar(c));
+                    }
+                }
+            }
+            Stop::Quote => return Ok((String { parts }, string)),
+        }
+        todo!()
+    }
+}
+
+fn parse_filler(filler: &str) -> Result<Filler, Error> {
+    let mut contents = Vec::new();
+    let chars = filler.char_indices().peekable();
+    todo!();
+    Ok(Filler { contents })
 }
 
 pub fn parse(program: &str) -> Result<Vec<ActionInvocation<'_>>, Error> {
@@ -61,7 +132,7 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation<'_>>, Error> {
             });
         }
         let line = ActionInvocation {
-            contents: parse_filler(unindented),
+            contents: parse_filler(unindented)?,
             attached: Vec::new(),
         };
         let line = match levels.iter_mut().rev().next() {
