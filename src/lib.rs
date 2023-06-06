@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use parco::Rest;
+
 fn unindent(mut line: &str) -> (usize, &str) {
     let mut level = 0;
     loop {
@@ -16,7 +18,7 @@ fn unindent(mut line: &str) -> (usize, &str) {
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct ActionInvocation {
-    pub contents: Filler,
+    pub name: Name,
     pub attached: Vec<ActionInvocation>,
 }
 
@@ -29,118 +31,130 @@ pub enum Error {
     },
     UnclosedQuote,
     UnexpectedCharacterEscaped,
+    WordInsideList,
 }
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum NamePart {
     Word(String),
-    String(String),
-    Filler(Filler),
+    String(HzString),
+    Name(Name),
+    List(List),
 }
 
 #[derive(PartialEq, Eq, Debug)]
-pub struct Filler {
-    contents: Vec<NamePart>,
+pub struct Name {
+    pub contents: Vec<NamePart>,
 }
 
-fn until<T, F: Fn(char) -> Option<T>>(s: &str, checker: F) -> Option<(&str, T, &str)> {
-    let mut char_indices = s.char_indices();
-    for (i, c) in char_indices {
-        if let Some(output) = checker(c) {
-            return Some((&s[..i], output, char_indices.as_str()));
+#[derive(PartialEq, Eq, Debug)]
+pub enum ListPart {
+    String(HzString),
+    Name(Name),
+    List(List),
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct List {
+    pub contents: Vec<ListPart>,
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub enum HzStringPart {
+    Raw(String),
+    Name(Name),
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct HzString {
+    pub parts: Vec<HzStringPart>,
+}
+
+type ParsingResult<'a, T> = parco::Result<T, &'a str, Error>;
+
+fn skip_whitespace(s: &str) -> &str {
+    for (i, c) in s.char_indices() {
+        if !c.is_whitespace() {
+            return &s[i..];
         }
     }
-    return None;
+    ""
 }
 
-fn skip_whitespace(rest: &str) -> Option<(char, &str)> {
-    match until(rest, |c| (!c.is_whitespace()).then(|| c)) {
-        None => (""),
-        Some((_whitespaces, c, rest)) => (c, rest),
-    }
-}
-
-fn parse_string(rest: &str) -> Result<(String, &str), Option<Error>> {
-    let Some((_, '"', rest)) = until(rest, |c| (!c.is_whitespace()).then(|| c)) else {
-        return Err(None);
+fn parse_string(rest: &str) -> ParsingResult<HzString> {
+    let mut rest = rest.chars();
+    let Some('"') = rest.next() else {
+        return ParsingResult::Err;
     };
-    let mut result = String::new();
-    let mut string = rest.chars();
-    while let Some(c) = string.next() {
+    let mut contents = Vec::new();
+    let mut raw = String::new();
+    while let Some(c) = rest.next() {
         match c {
-            '\\' => match string.next() {
-                None => return Err(Some(Error::UnclosedQuote)),
-                Some(c @ ('\\' | '"')) => result.push(c),
-                Some(_) => return Err(Some(Error::UnexpectedCharacterEscaped)),
+            '\\' => match rest.next() {
+                None => return ParsingResult::Fatal(Error::UnclosedQuote),
+                Some(c @ ('\\' | '"')) => raw.push(c),
+                Some(_) => return ParsingResult::Fatal(Error::UnexpectedCharacterEscaped),
             },
             '"' => {
-                result.shrink_to_fit();
-                return Ok((result, string.as_str()));
-            }
-            _ => result.push(c),
-        }
-    }
-    Err(Some(Error::UnclosedQuote))
-}
-
-enum Token {
-    OpeningBrace,
-    ClosingBrace,
-    OpeningBracket,
-    ClosingBracket,
-    OpeningParen,
-    ClosingParen,
-    Quote,
-    Whitespace,
-    Other(char),
-}
-
-impl From<char> for Token {
-    fn from(value: char) -> Self {
-        match value {
-            '(' => Self::OpeningParen,
-            ')' => Self::ClosingParen,
-            ']' => Self::ClosingBracket,
-            '[' => Self::OpeningBracket,
-            '{' => Self::OpeningBrace,
-            '}' => Self::ClosingBrace,
-            '"' => Self::Quote,
-            c if c.is_whitespace() => Self::Whitespace,
-            c => Self::Other(c),
-        }
-    }
-}
-
-fn parse_word(rest: &str) -> Result<(String, Token, &str), Option<Error>> {
-    let Some((_, Token::Other(c), rest)) =
-        until(rest, |c| (!c.is_whitespace()).then(|| c.into())) else {
-            return Err(None);
-    };
-    let mut word = String::from(c);
-    let Some((word_rest, token, rest)) =
-        until(rest, |c| if let Token::Other(c) = c.into() { Some(c) } else { None })
-}
-
-fn parse_filler(filler: &str) -> Result<(Filler, &str), Error> {
-    let mut filler = filler.chars();
-    let mut contents = Vec::new();
-    while let Some(c) = filler.next() {
-        match c {
-            '"' => {
-                let (result, rest) = parse_string(filler.as_str())?;
-                contents.push(NamePart::String(result));
+                contents.shrink_to_fit();
+                return ParsingResult::Ok((raw, Rest(rest.as_str())));
             }
             '{' => {
-                let (result, rest) = parse_word(filler.as_str())?;
+
             }
-            _ if c.is_whitespace() => {}
+            _ => raw.push(c),
         }
     }
-    let mut contents = Vec::new();
-    for word in filler.split_whitespace() {
-        contents.push(Word::Raw(word.to_owned()));
+    ParsingResult::Fatal(Error::UnclosedQuote)
+}
+
+fn parse_word(rest: &str) -> ParsingResult<String> {
+    for (i, c) in rest.char_indices() {
+        if "[]{}()\"".contains(c) || c.is_whitespace() {
+            let word = &rest[..i];
+            return if word.is_empty() {
+                ParsingResult::Err
+            } else {
+                ParsingResult::Ok((word.to_owned(), Rest(&rest[i..])))
+            };
+        }
     }
-    Filler { contents }
+    ParsingResult::Ok((rest.to_owned(), Rest("")))
+}
+
+fn parse_braced_name(rest: &str) -> ParsingResult<Name> {
+    todo!()
+}
+
+#[cfg_attr(rustfmt, rustfmt_skip)]
+fn parse_name_part(rest: &str) -> ParsingResult<NamePart> {
+    rest = skip_whitespace(rest);
+    parse_word(rest).map(|word| NamePart::Word(word))
+        .or(|| parse_string(rest).map(|string| NamePart::String(string)))
+        .or(|| parse_braced_name(rest).map(|filler| NamePart::Name(filler)))
+        .or(|| parse_list(rest).map(|list| NamePart::List(list)))
+}
+
+fn parse_name(rest: &str) -> ParsingResult<Name> {
+    todo!()
+}
+
+fn parse_list(rest: &str) -> ParsingResult<List> {
+    let mut contents = Vec::new();
+    let rest = {
+        let mut chars = rest.chars();
+        let Some('(') = chars.next() else {
+            return ParsingResult::Err;
+        };
+        chars.as_str()
+    };
+    loop {
+        rest = skip_whitespace(rest);
+        match parse_name_part(rest) {
+            ParsingResult::Ok((name_part, rest)) => match name_part {},
+            ParsingResult::Err => 
+        }
+    }
 }
 
 pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
@@ -156,8 +170,15 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
                 present_indentation: level,
             });
         }
+        let name = match parse_name(unindented) {
+            ParsingResult::Ok((name, _rest)) => name,
+            ParsingResult::Err => Name {
+                contents: Vec::new(),
+            },
+            ParsingResult::Fatal(error) => return Err(error),
+        };
         let line = ActionInvocation {
-            contents: parse_filler(unindented)?,
+            name,
             attached: Vec::new(),
         };
         let line = match levels.iter_mut().rev().next() {
@@ -203,7 +224,7 @@ mod tests {
     fn line(contents: Vec<NamePart>, attached: Vec<ActionInvocation>) -> ActionInvocation {
         ActionInvocation {
             attached,
-            contents: Filler { contents },
+            name: Name { contents },
         }
     }
 
