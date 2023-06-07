@@ -23,18 +23,25 @@ pub struct ActionInvocation {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Error {
+pub enum ErrorKind {
     OverIndented {
-        line_index: usize,
         expected_indentations: HashSet<usize>,
         present_indentation: usize,
     },
-    UnclosedQuote,
-    UnexpectedCharacterEscaped,
+    UnexpectedCharacterEscaped {
+        character: char,
+    },
     WordInsideList,
+    UnclosedQuote,
     UnclosedParen,
     UnclosedBracket,
     UnclosedBrace,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Error {
+    line_index: usize,
+    kind: ErrorKind,
 }
 
 impl<T> From<Error> for ParsingResult<'_, T> {
@@ -83,7 +90,7 @@ pub struct HzString {
     pub parts: Vec<HzStringPart>,
 }
 
-type ParsingResult<'a, T> = parco::Result<T, &'a str, Error>;
+type ParsingResult<'a, T> = parco::Result<T, &'a str, ErrorKind>;
 
 fn skip_whitespace(s: &str) -> &str {
     for (i, c) in s.char_indices() {
@@ -97,10 +104,11 @@ fn skip_whitespace(s: &str) -> &str {
 fn parse_string_character(rest: &str) -> ParsingResult<char> {
     parco::one_part(rest)
         .and(|(c, Rest(rest))| match c {
-            '"' | '{' | '}' => ParsingResult::Err,
-            '\\' => parco::one_matching_part(rest, |c| ['{', '}', '"'].contains(c))
-                .and(|(c, Rest(rest))| ParsingResult::Ok((c, Rest(rest))))
-                .or(|| Error::UnexpectedCharacterEscaped.into()),
+            '"' | '{' => ParsingResult::Err,
+            '\\' => parco::one_part(rest).and().or(ErrorKind::) parco::one_matching_part(rest, |c| ['{', '"'].contains(c))
+                .or(|| {
+                    parco::one_part(rest)
+                }Error::UnexpectedCharacterEscaped { character: }.into()),
             _ => ParsingResult::Ok((c, Rest(rest))),
         })
         .or(|| Error::UnclosedQuote.into())
@@ -118,36 +126,26 @@ fn parse_string_characters(rest: &str) -> ParsingResult<String> {
         })
 }
 
-fn parse_string(rest: &str) -> ParsingResult<HzString> {
-    parco::one_matching_part(rest, |c| *c == '"')
-        .and(|(_, rest)| {
-            let contents: ParsingResult<Vec<_>> = parco::collect_repeating(rest, |rest| {});
-            let mut contents = Vec::new();
-            let mut raw = String::new();
-            while let Some(c) = rest.next() {
-                match c {
-                    '\\' => match rest.next() {
-                        None => return ParsingResult::Fatal(Error::UnclosedQuote),
-                        Some(c @ ('\\' | '"')) => raw.push(c),
-                        Some(_) => return ParsingResult::Fatal(Error::UnexpectedCharacterEscaped),
-                    },
-                    '"' => {
-                        contents.shrink_to_fit();
-                        return ParsingResult::Ok((raw, Rest(rest)));
-                    }
-                    '{' => {}
-                    _ => raw.push(c),
-                }
-            }
+fn parse_unquoted_string(rest: &str) -> ParsingResult<HzString> {
+    let mut parts = Vec::new();
+    parco::collect_repeating(rest, |rest| {
+        parco::one_part(*rest).and(|(c, Rest(rest))| match c {
+            '\\' => parco::one_part(rest).and(|(c, Rest(rest))| match c {
+                '{' | ''
+            }).or()
         })
-        .or(|| ParsingResult::Fatal(Error::UnclosedQuote));
-    let mut rest = rest.chars();
-    let Some('"') = rest.next() else {
-        return ParsingResult::Err;
-    };
-    let mut contents = Vec::new();
-    let mut raw = String::new();
-    ParsingResult::Fatal(Error::UnclosedQuote)
+    })
+    while let Some((c, Rest(new_rest))) = rest.take_one_part() {
+        rest = new_rest;
+        match c {
+            '\\' => 
+        }
+    }
+    ParsingResult::Ok((HzString { parts }, Rest(rest)))
+}
+
+fn parse_string(rest: &str) -> ParsingResult<HzString> {
+    parco::one_matching_part(rest, |c| *c == '"').and(|(_, Rest(rest))| parse_unquoted_string(rest)).and(|(contents, Rest(rest))| parco::one_matching_part(rest, |c| *c == '"').and(|(_, rest)| ParsingResult::Ok((contents, rest))))
 }
 
 fn parse_word(rest: &str) -> ParsingResult<String> {
