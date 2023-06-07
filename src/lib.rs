@@ -37,6 +37,12 @@ pub enum Error {
     UnclosedBrace,
 }
 
+impl<T> From<Error> for ParsingResult<'_, T> {
+    fn from(error: Error) -> Self {
+        ParsingResult::Fatal(error)
+    }
+}
+
 #[derive(PartialEq, Eq, Debug)]
 pub enum NamePart {
     Word(String),
@@ -88,28 +94,59 @@ fn skip_whitespace(s: &str) -> &str {
     ""
 }
 
+fn parse_string_character(rest: &str) -> ParsingResult<char> {
+    parco::one_part(rest)
+        .and(|(c, Rest(rest))| match c {
+            '"' | '{' | '}' => ParsingResult::Err,
+            '\\' => parco::one_matching_part(rest, |c| ['{', '}', '"'].contains(c))
+                .and(|(c, Rest(rest))| ParsingResult::Ok((c, Rest(rest))))
+                .or(|| Error::UnexpectedCharacterEscaped.into()),
+            _ => ParsingResult::Ok((c, Rest(rest))),
+        })
+        .or(|| Error::UnclosedQuote.into())
+}
+
+fn parse_string_characters(rest: &str) -> ParsingResult<String> {
+    parco::collect_repeating(rest, |rest| parco::one_part(*rest))
+        .into()
+        .and(|(characters, rest)| {
+            if characters.is_empty() {
+                ParsingResult::Err
+            } else {
+                ParsingResult::Ok(())
+            }
+        })
+}
+
 fn parse_string(rest: &str) -> ParsingResult<HzString> {
+    parco::one_matching_part(rest, |c| *c == '"')
+        .and(|(_, rest)| {
+            let contents: ParsingResult<Vec<_>> = parco::collect_repeating(rest, |rest| {});
+            let mut contents = Vec::new();
+            let mut raw = String::new();
+            while let Some(c) = rest.next() {
+                match c {
+                    '\\' => match rest.next() {
+                        None => return ParsingResult::Fatal(Error::UnclosedQuote),
+                        Some(c @ ('\\' | '"')) => raw.push(c),
+                        Some(_) => return ParsingResult::Fatal(Error::UnexpectedCharacterEscaped),
+                    },
+                    '"' => {
+                        contents.shrink_to_fit();
+                        return ParsingResult::Ok((raw, Rest(rest)));
+                    }
+                    '{' => {}
+                    _ => raw.push(c),
+                }
+            }
+        })
+        .or(|| ParsingResult::Fatal(Error::UnclosedQuote));
     let mut rest = rest.chars();
     let Some('"') = rest.next() else {
         return ParsingResult::Err;
     };
     let mut contents = Vec::new();
     let mut raw = String::new();
-    while let Some(c) = rest.next() {
-        match c {
-            '\\' => match rest.next() {
-                None => return ParsingResult::Fatal(Error::UnclosedQuote),
-                Some(c @ ('\\' | '"')) => raw.push(c),
-                Some(_) => return ParsingResult::Fatal(Error::UnexpectedCharacterEscaped),
-            },
-            '"' => {
-                contents.shrink_to_fit();
-                return ParsingResult::Ok((raw, Rest(rest.as_str())));
-            }
-            '{' => {}
-            _ => raw.push(c),
-        }
-    }
     ParsingResult::Fatal(Error::UnclosedQuote)
 }
 
@@ -164,13 +201,11 @@ fn parse_list(rest: &str) -> ParsingResult<List> {
             ParsingResult::Ok((filler, rest)) => {
                 contents.push(filler);
                 rest
-            },
+            }
             ParsingResult::Err => {
                 rest = skip_whitespace(rest);
-                match rest.take_one_part() {
-                    None => 
-                }
-            },
+                match rest.take_one_part() {}
+            }
             ParsingResult::Fatal(error) => return ParsingResult::Fatal(error),
         }
     }
