@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use parco::{Input, Rest};
+use parco::{CollResult, Input, Rest};
 
 fn unindent(mut line: &str) -> (usize, &str) {
     let mut level = 0;
@@ -24,7 +24,7 @@ pub struct ActionInvocation {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ErrorKind {
-    OverIndented {
+    Overindented {
         expected_indentations: HashSet<usize>,
         present_indentation: usize,
     },
@@ -44,8 +44,8 @@ pub struct Error {
     kind: ErrorKind,
 }
 
-impl<T> From<Error> for ParsingResult<'_, T> {
-    fn from(error: Error) -> Self {
+impl<T> From<ErrorKind> for ParsingResult<'_, T> {
+    fn from(error: ErrorKind) -> Self {
         ParsingResult::Fatal(error)
     }
 }
@@ -101,51 +101,31 @@ fn skip_whitespace(s: &str) -> &str {
     ""
 }
 
-fn parse_string_character(rest: &str) -> ParsingResult<char> {
-    parco::one_part(rest)
-        .and(|(c, Rest(rest))| match c {
-            '"' | '{' => ParsingResult::Err,
-            '\\' => parco::one_part(rest).and().or(ErrorKind::) parco::one_matching_part(rest, |c| ['{', '"'].contains(c))
-                .or(|| {
-                    parco::one_part(rest)
-                }Error::UnexpectedCharacterEscaped { character: }.into()),
-            _ => ParsingResult::Ok((c, Rest(rest))),
-        })
-        .or(|| Error::UnclosedQuote.into())
-}
+fn parse_raw_string_part(rest: &str) -> ParsingResult<String> {}
 
-fn parse_string_characters(rest: &str) -> ParsingResult<String> {
-    parco::collect_repeating(rest, |rest| parco::one_part(*rest))
-        .into()
-        .and(|(characters, rest)| {
-            if characters.is_empty() {
-                ParsingResult::Err
-            } else {
-                ParsingResult::Ok(())
-            }
-        })
-}
-
-fn parse_unquoted_string(rest: &str) -> ParsingResult<HzString> {
-    let mut parts = Vec::new();
+fn parse_string_parts(rest: &str) -> ParsingResult<Vec<StringPart>> {
     parco::collect_repeating(rest, |rest| {
         parco::one_part(*rest).and(|(c, Rest(rest))| match c {
-            '\\' => parco::one_part(rest).and(|(c, Rest(rest))| match c {
-                '{' | ''
-            }).or()
+            '"' => ParsingResult::Err,
+            '\\' => parco::one_part(rest)
+                .and(|(c, rest)| match c {
+                    '{' | '"' => ParsingResult::Ok((c, rest)),
+                    _ => ErrorKind::UnexpectedCharacterEscaped { character: c }.into(),
+                })
+                .or(|| ErrorKind::UnclosedQuote.into()),
         })
     })
-    while let Some((c, Rest(new_rest))) = rest.take_one_part() {
-        rest = new_rest;
-        match c {
-            '\\' => 
-        }
-    }
-    ParsingResult::Ok((HzString { parts }, Rest(rest)))
+    .into()
 }
 
 fn parse_string(rest: &str) -> ParsingResult<HzString> {
-    parco::one_matching_part(rest, |c| *c == '"').and(|(_, Rest(rest))| parse_unquoted_string(rest)).and(|(contents, Rest(rest))| parco::one_matching_part(rest, |c| *c == '"').and(|(_, rest)| ParsingResult::Ok((contents, rest))))
+    parco::one_matching_part(rest, |c| *c == '"')
+        .and(|(_, Rest(rest))| parse_string_parts(rest).map(|parts| HzString { parts }))
+        .and(|(contents, Rest(rest))| {
+            parco::one_matching_part(rest, |c| *c == '"')
+                .and(|(_, rest)| ParsingResult::Ok((contents, rest)))
+                .or(|| ErrorKind::UnclosedQuote.into())
+        })
 }
 
 fn parse_word(rest: &str) -> ParsingResult<String> {
@@ -163,7 +143,13 @@ fn parse_word(rest: &str) -> ParsingResult<String> {
 }
 
 fn parse_braced_name(rest: &str) -> ParsingResult<Name> {
-    todo!()
+    parco::one_matching_part(rest, |c| *c == '{')
+        .and(|(_, Rest(rest))| parse_name(rest))
+        .and(|(name, Rest(rest))| {
+            parco::one_matching_part(rest, |c| *c == '}')
+                .and(|(_, rest)| ParsingResult::Ok((name, rest)))
+                .or(|| ErrorKind::UnclosedBrace.into())
+        })
 }
 
 fn parse_name_part(rest: &str) -> ParsingResult<NamePart> {
