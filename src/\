@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use parco::Rest;
+use parco::{Input, Rest};
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct ActionInvocation {
@@ -31,11 +31,8 @@ pub struct Error {
 }
 
 #[derive(PartialEq, Eq, Debug)]
-pub struct Word(pub String);
-
-#[derive(PartialEq, Eq, Debug)]
 pub enum NamePart {
-    Word(Word),
+    Word(String),
     Filler(Filler),
 }
 
@@ -63,11 +60,8 @@ pub struct List {
 }
 
 #[derive(PartialEq, Eq, Debug)]
-pub struct RawHzStringPart(pub String);
-
-#[derive(PartialEq, Eq, Debug)]
 pub enum HzStringPart {
-    Raw(RawHzStringPart),
+    Raw(String),
     Name(Name),
 }
 
@@ -104,11 +98,11 @@ fn collect_repeating<
     'a,
     T,
     C: FromIterator<T> + Shrinkable,
-    P: Fn(&&'a str) -> ParsingResult<'a, T>,
+    P: Fn(&'a &'a str) -> ParsingResult<'a, T>,
 >(
     rest: &'a str,
     parser: P,
-) -> ParsingResult<'a, C> {
+) -> ParsingResult<C> {
     let result: ParsingResult<C> = parco::collect_repeating(rest, parser).into();
     result.map(|mut collection| {
         collection.shrink_to_fit();
@@ -125,8 +119,8 @@ fn skip_whitespace(s: &str) -> &str {
     ""
 }
 
-fn parse_raw_string_part(rest: &str) -> ParsingResult<RawHzStringPart> {
-    collect_repeating(rest, |rest| {
+fn parse_raw_string_part(rest: &str) -> ParsingResult<String> {
+    let result: ParsingResult<String> = collect_repeating(rest, |rest| {
         parco::one_part(*rest).and(|c, Rest(rest)| match c {
             '{' | '"' => ParsingResult::Err,
             '\\' => parco::one_part(rest)
@@ -137,12 +131,12 @@ fn parse_raw_string_part(rest: &str) -> ParsingResult<RawHzStringPart> {
                 .or(|| ErrorKind::UnclosedQuote.into()),
             _ => ParsingResult::Ok(c, Rest(rest)),
         })
-    })
-    .and(|raw_part: String, rest| {
+    });
+    result.and(|raw_part, rest| {
         if raw_part.is_empty() {
             ParsingResult::Err
         } else {
-            ParsingResult::Ok(RawHzStringPart(raw_part), rest)
+            ParsingResult::Ok(raw_part, rest)
         }
     })
 }
@@ -165,17 +159,18 @@ fn parse_string(rest: &str) -> ParsingResult<HzString> {
         })
 }
 
-fn parse_word(rest: &str) -> ParsingResult<Word> {
-    collect_repeating(rest, |rest| {
-        parco::one_matching_part(*rest, |c| !("[]{}()\"".contains(*c) || c.is_whitespace()))
-    })
-    .and(|word: String, rest| {
-        if word.is_empty() {
-            ParsingResult::Err
-        } else {
-            ParsingResult::Ok(Word(word), rest)
+fn parse_word(rest: &str) -> ParsingResult<String> {
+    for (i, c) in rest.char_indices() {
+        if "[]{}()\"".contains(c) || c.is_whitespace() {
+            let word = &rest[..i];
+            return if word.is_empty() {
+                ParsingResult::Err
+            } else {
+                ParsingResult::Ok(word.to_owned(), Rest(&rest[i..]))
+            };
         }
-    })
+    }
+    ParsingResult::Ok(rest.to_owned(), Rest(""))
 }
 
 fn parse_braced_name(rest: &str) -> ParsingResult<Name> {
@@ -202,39 +197,16 @@ fn parse_filler(rest: &str) -> ParsingResult<Filler> {
         .or(|| parse_dict(rest).map(|dict| Filler::Dict(dict)))
 }
 
-fn parse_dict_contents(rest: &str) -> ParsingResult<Vec<(Filler, Filler)>> {
-    collect_repeating(rest, |rest| {
-        parse_filler(skip_whitespace(rest)).and(|key, Rest(rest)| {
-            parco::one_matching_part(skip_whitespace(rest), |c| *c == ':').and(|_, Rest(rest)| {
-                parse_filler(skip_whitespace(rest))
-                    .and(|value, rest| ParsingResult::Ok((key, value), rest))
-            })
-        })
-    })
-}
-
 fn parse_dict(rest: &str) -> ParsingResult<Dict> {
-    parco::one_matching_part(rest, |c| *c == '[')
-        .and(|_, Rest(rest)| parse_dict_contents(rest).map(|contents| Dict { contents }))
-        .and(|dict, Rest(rest)| {
-            parco::one_matching_part(rest, |c| *c == ']')
-                .and(|_, rest| ParsingResult::Ok(dict, rest))
-                .or(|| ErrorKind::UnclosedBracket.into())
-        })
+    todo!()
 }
 
 fn parse_name(rest: &str) -> ParsingResult<Name> {
-    collect_repeating(rest, |rest| {
-        let rest = skip_whitespace(rest);
-        parse_filler(rest)
-            .map(|filler| NamePart::Filler(filler))
-            .or(|| parse_word(rest).map(|word| NamePart::Word(word)))
-    })
-    .map(|contents| Name { contents })
+    todo!()
 }
 
 fn parse_list_contents(rest: &str) -> ParsingResult<Vec<Filler>> {
-    collect_repeating(rest, |rest| parse_filler(skip_whitespace(rest)))
+    collect_repeating(rest, |rest| parse_filler(rest))
 }
 
 fn parse_list(rest: &str) -> ParsingResult<List> {
@@ -342,7 +314,7 @@ mod tests {
     }
 
     fn word(word: &str) -> NamePart {
-        NamePart::Word(Word(word.to_owned()))
+        NamePart::Word(word.to_owned())
     }
 
     #[test]
