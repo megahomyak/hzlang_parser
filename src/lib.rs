@@ -438,7 +438,7 @@ mod tests {
     #[test]
     fn correct_string() {
         assert_eq!(
-            parse("\"abc{def\"ghi\"jkl}m\\\\n\\\"o\\{\""),
+            parse(r#""abc{def"ghi"jkl}m\\n\"o\{""#),
             Ok(vec![line(
                 vec![NamePart::Filler(Filler::String(HzString {
                     parts: vec![
@@ -465,7 +465,7 @@ mod tests {
     #[test]
     fn incorrect_string_1() {
         assert_eq!(
-            parse("\""),
+            parse(r#"""#),
             Err(Error {
                 line_index: 0,
                 kind: ErrorKind::UnclosedQuote,
@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn incorrect_string_2() {
         assert_eq!(
-            parse("\"\\"),
+            parse(r#""\"#),
             Err(Error {
                 line_index: 0,
                 kind: ErrorKind::UnclosedQuote,
@@ -487,7 +487,7 @@ mod tests {
     #[test]
     fn incorrect_string_3() {
         assert_eq!(
-            parse("\"\\a"),
+            parse(r#""\a"#),
             Err(Error {
                 line_index: 0,
                 kind: ErrorKind::UnexpectedCharacterEscaped { character: 'a' },
@@ -498,10 +498,95 @@ mod tests {
     #[test]
     fn incorrect_name_filler() {
         assert_eq!(
-            parse("{"),
+            parse(r#"{"#),
             Err(Error {
                 line_index: 0,
                 kind: ErrorKind::NameExpected
+            })
+        )
+    }
+
+    #[test]
+    fn correct_dict() {
+        assert_eq!(
+            parse(r#"["a": "b", "c": {d}]"#),
+            Ok(vec![line(
+                vec![NamePart::Filler(Filler::Dict(Dict {
+                    contents: vec![
+                        (
+                            Filler::String(HzString {
+                                parts: vec![HzStringPart::Raw(RawHzStringPart("a".to_owned()))]
+                            }),
+                            Filler::String(HzString {
+                                parts: vec![HzStringPart::Raw(RawHzStringPart("b".to_owned()))]
+                            })
+                        ),
+                        (
+                            Filler::String(HzString {
+                                parts: vec![HzStringPart::Raw(RawHzStringPart("c".to_owned()))]
+                            }),
+                            Filler::Name(Name {
+                                contents: vec![NamePart::Word(Word("d".to_owned()))]
+                            })
+                        )
+                    ]
+                }))],
+                vec![]
+            )])
+        )
+    }
+
+    #[test]
+    fn incorrect_dict_1() {
+        assert_eq!(
+            parse(r#"["#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::FillerExpectedAsDictKey
+            })
+        )
+    }
+
+    #[test]
+    fn incorrect_dict_2() {
+        assert_eq!(
+            parse(r#"["a""#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::ColonExpectedInDict
+            })
+        )
+    }
+
+    #[test]
+    fn incorrect_dict_3() {
+        assert_eq!(
+            parse(r#"["a":"#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::FillerExpectedAsDictValue
+            })
+        )
+    }
+
+    #[test]
+    fn incorrect_dict_4() {
+        assert_eq!(
+            parse(r#"["a": "b""#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::ClosingBracketOrCommaExpectedInDict
+            })
+        )
+    }
+
+    #[test]
+    fn incorrect_dict_5() {
+        assert_eq!(
+            parse(r#"["a": "b" "c""#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::ClosingBracketOrCommaExpectedInDict
             })
         )
     }
