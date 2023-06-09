@@ -144,7 +144,7 @@ fn parse_raw_string_part(rest: &str) -> ParsingResult<RawHzStringPart> {
                 '\\' => parco::one_part(rest)
                     .or(|| ErrorKind::UnclosedQuote.into())
                     .and(|c, rest| match c {
-                        '{' | '"' => ParsingResult::Ok(c, rest),
+                        '{' | '"' | '\\' => ParsingResult::Ok(c, rest),
                         _ => ErrorKind::UnexpectedCharacterEscaped { character: c }.into(),
                     }),
                 _ => ParsingResult::Ok(c, Rest(rest)),
@@ -438,7 +438,7 @@ mod tests {
     #[test]
     fn correct_string() {
         assert_eq!(
-            parse("\"abc{def\"ghi\"jkl}mn\\\"o\""),
+            parse("\"abc{def\"ghi\"jkl}m\\\\n\\\"o\\{\""),
             Ok(vec![line(
                 vec![NamePart::Filler(Filler::String(HzString {
                     parts: vec![
@@ -454,7 +454,7 @@ mod tests {
                                 NamePart::Word(Word("jkl".to_owned())),
                             ]
                         }),
-                        HzStringPart::Raw(RawHzStringPart("mn\"o".to_owned())),
+                        HzStringPart::Raw(RawHzStringPart("m\\n\"o{".to_owned())),
                     ]
                 }))],
                 vec![]
@@ -470,4 +470,9 @@ mod tests {
 
     #[test]
     fn incorrect_string_3() {}
+
+    #[test]
+    fn incorrect_name_filler() {
+        assert_eq!(parse("{"), Err(Error { line_index: 0, kind: ErrorKind::ClosingBracketOrCommaExpectedInDict }))
+    }
 }
