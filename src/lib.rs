@@ -22,10 +22,12 @@ pub enum ErrorKind {
     UnclosedBrace,
     ColonExpectedInDict,
     FillerExpectedInList,
-    FillerExpectedAsDictKey,
     FillerExpectedAsDictValue,
     ClosingBracketOrCommaExpectedInDict,
     NameExpected,
+    UnexpectedClosingBracket,
+    UnexpectedClosingBrace,
+    UnexpectedClosingParen,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -205,17 +207,15 @@ fn parse_filler(rest: &str) -> ParsingResult<Filler> {
 }
 
 fn parse_dict_pair(rest: &str) -> ParsingResult<(Filler, Filler)> {
-    parse_filler(skip_whitespace(rest))
-        .or(|| ErrorKind::FillerExpectedAsDictKey.into())
-        .and(|key, Rest(rest)| {
-            parco::one_matching_part(skip_whitespace(rest), |c| *c == ':')
-                .or(|| ErrorKind::ColonExpectedInDict.into())
-                .and(|_, Rest(rest)| {
-                    parse_filler(skip_whitespace(rest))
-                        .or(|| ErrorKind::FillerExpectedAsDictValue.into())
-                        .and(|value, rest| ParsingResult::Ok((key, value), rest))
-                })
-        })
+    parse_filler(skip_whitespace(rest)).and(|key, Rest(rest)| {
+        parco::one_matching_part(skip_whitespace(rest), |c| *c == ':')
+            .or(|| ErrorKind::ColonExpectedInDict.into())
+            .and(|_, Rest(rest)| {
+                parse_filler(skip_whitespace(rest))
+                    .or(|| ErrorKind::FillerExpectedAsDictValue.into())
+                    .and(|value, rest| ParsingResult::Ok((key, value), rest))
+            })
+    })
 }
 
 fn parse_dict_contents(rest: &str) -> ParsingResult<Vec<(Filler, Filler)>> {
@@ -305,16 +305,31 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
             });
         }
         let name = match parse_name(unindented) {
-            ParsingResult::Ok(name, _rest) => name,
-            ParsingResult::Err => Name {
-                contents: Vec::new(),
+            ParsingResult::Ok(name, Rest(rest)) => match skip_whitespace(rest).take_one_part() {
+                None => Ok(name),
+                Some(_) => unreachable!(),
             },
-            ParsingResult::Fatal(error_kind) => {
+            ParsingResult::Err => match skip_whitespace(unindented).take_one_part() {
+                None => Ok(Name {
+                    contents: Vec::new(),
+                }),
+                Some((c, _rest)) => match c {
+                    ']' => Err(ErrorKind::UnexpectedClosingBracket),
+                    ')' => Err(ErrorKind::UnexpectedClosingParen),
+                    '}' => Err(ErrorKind::UnexpectedClosingBrace),
+                    _ => unreachable!(),
+                },
+            },
+            ParsingResult::Fatal(error_kind) => Err(error_kind),
+        };
+        let name = match name {
+            Err(error_kind) => {
                 return Err(Error {
                     line_index: index,
                     kind: error_kind,
                 })
             }
+            Ok(name) => name,
         };
         let line = ActionInvocation {
             name,
@@ -559,23 +574,12 @@ mod tests {
     }
 
     #[test]
-    fn correct_dict_3() {
-        assert_eq!(
-            parse(r#"]"#),
-            Ok(vec![line(
-                vec![NamePart::Filler(Filler::Dict(Dict { contents: vec![] }))],
-                vec![]
-            )])
-        )
-    }
-
-    #[test]
     fn incorrect_dict_1() {
         assert_eq!(
             parse(r#"["#),
             Err(Error {
                 line_index: 0,
-                kind: ErrorKind::FillerExpectedAsDictKey
+                kind: ErrorKind::ClosingBracketOrCommaExpectedInDict
             })
         )
     }
@@ -633,5 +637,21 @@ mod tests {
                 kind: ErrorKind::ClosingBracketOrCommaExpectedInDict
             })
         )
+    }
+
+    #[test]
+    fn incorrect_dict_7() {
+        assert_eq!(
+            parse(r#"]"#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::UnexpectedClosingBracket
+            })
+        )
+    }
+
+    #[test]
+    fn empty_program() {
+        assert_eq!(parse(r#""#), Ok(vec![]))
     }
 }
