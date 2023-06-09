@@ -191,7 +191,11 @@ fn parse_word(rest: &str) -> ParsingResult<Word> {
 
 fn parse_braced_name(rest: &str) -> ParsingResult<Name> {
     parco::one_matching_part(rest, |c| *c == '{')
-        .and(|_, Rest(rest)| parse_name(rest).or(|| ErrorKind::NameExpected.into()))
+        .and(|_, Rest(rest)| {
+            fail_if_empty(parse_name_contents(rest))
+                .map(|contents| Name { contents })
+                .or(|| ErrorKind::NameExpected.into())
+        })
         .and(|name, Rest(rest)| {
             parco::one_matching_part(rest, |c| *c == '}')
                 .and(|_, rest| ParsingResult::Ok(name, rest))
@@ -246,8 +250,8 @@ fn parse_dict(rest: &str) -> ParsingResult<Dict> {
         })
 }
 
-fn parse_name(rest: &str) -> ParsingResult<Name> {
-    fail_if_empty(shrink(
+fn parse_name_contents(rest: &str) -> ParsingResult<Vec<NamePart>> {
+    shrink(
         parco::collect_repeating(rest, |rest| {
             let rest = skip_whitespace(rest);
             parse_filler(rest)
@@ -255,8 +259,7 @@ fn parse_name(rest: &str) -> ParsingResult<Name> {
                 .or(|| parse_word(rest).map(|word| NamePart::Word(word)))
         })
         .into(),
-    ))
-    .map(|contents| Name { contents })
+    )
 }
 
 fn parse_list(rest: &str) -> ParsingResult<List> {
@@ -304,15 +307,9 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
                 line_index: index,
             });
         }
-        let name = match parse_name(unindented) {
+        let name = match parse_name_contents(unindented).map(|contents| Name { contents }) {
             ParsingResult::Ok(name, Rest(rest)) => match skip_whitespace(rest).take_one_part() {
                 None => Ok(name),
-                Some(_) => unreachable!(),
-            },
-            ParsingResult::Err => match skip_whitespace(unindented).take_one_part() {
-                None => Ok(Name {
-                    contents: Vec::new(),
-                }),
                 Some((c, _rest)) => match c {
                     ']' => Err(ErrorKind::UnexpectedClosingBracket),
                     ')' => Err(ErrorKind::UnexpectedClosingParen),
@@ -320,6 +317,7 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
                     _ => unreachable!(),
                 },
             },
+            ParsingResult::Err => unreachable!(),
             ParsingResult::Fatal(error_kind) => Err(error_kind),
         };
         let name = match name {
@@ -640,12 +638,34 @@ mod tests {
     }
 
     #[test]
-    fn incorrect_dict_7() {
+    fn unexpected_bracket() {
         assert_eq!(
-            parse(r#"]"#),
+            parse(r#"a]"#),
             Err(Error {
                 line_index: 0,
                 kind: ErrorKind::UnexpectedClosingBracket
+            })
+        )
+    }
+
+    #[test]
+    fn unexpected_brace() {
+        assert_eq!(
+            parse(r#"a}"#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::UnexpectedClosingBrace
+            })
+        )
+    }
+
+    #[test]
+    fn unexpected_paren() {
+        assert_eq!(
+            parse(r#"a)"#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::UnexpectedClosingParen
             })
         )
     }
