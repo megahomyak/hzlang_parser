@@ -638,7 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn unexpected_bracket() {
+    fn unexpected_bracket_1() {
         assert_eq!(
             parse(r#"a]"#),
             Err(Error {
@@ -649,7 +649,18 @@ mod tests {
     }
 
     #[test]
-    fn unexpected_brace() {
+    fn unexpected_bracket_2() {
+        assert_eq!(
+            parse(r#"]"#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::UnexpectedClosingBracket
+            })
+        )
+    }
+
+    #[test]
+    fn unexpected_brace_1() {
         assert_eq!(
             parse(r#"a}"#),
             Err(Error {
@@ -660,9 +671,31 @@ mod tests {
     }
 
     #[test]
-    fn unexpected_paren() {
+    fn unexpected_brace_2() {
+        assert_eq!(
+            parse(r#"}"#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::UnexpectedClosingBrace
+            })
+        )
+    }
+
+    #[test]
+    fn unexpected_paren_1() {
         assert_eq!(
             parse(r#"a)"#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::UnexpectedClosingParen
+            })
+        )
+    }
+
+    #[test]
+    fn unexpected_paren_2() {
+        assert_eq!(
+            parse(r#")"#),
             Err(Error {
                 line_index: 0,
                 kind: ErrorKind::UnexpectedClosingParen
