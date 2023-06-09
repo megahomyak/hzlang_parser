@@ -268,7 +268,7 @@ fn parse_list(rest: &str) -> ParsingResult<List> {
             parco::collect_repeating(rest, |rest| {
                 parse_filler(skip_whitespace(rest)).or(|| match rest.take_one_part() {
                     None => ErrorKind::UnclosedParen.into(),
-                    Some((')', _rest)) => ParsingResult::Err,
+                    Some((')', rest)) => ParsingResult::Ok(')', rest),
                     Some(_) => ErrorKind::FillerExpectedInList.into(),
                 })
             })
@@ -706,5 +706,21 @@ mod tests {
     #[test]
     fn empty_program() {
         assert_eq!(parse(r#""#), Ok(vec![]))
+    }
+
+    #[test]
+    fn correct_list() {}
+
+    #[test]
+    fn empty_list() {
+        assert_eq!(
+            parse(r#"()"#),
+            Ok(vec![line(
+                vec![NamePart::Filler(Filler::List(List {
+                    contents: Vec::new()
+                }))],
+                vec![]
+            )])
+        )
     }
 }
