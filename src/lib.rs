@@ -120,8 +120,8 @@ fn fail_if_empty<C: Container>(c: ParsingResult<C>) -> ParsingResult<C> {
     })
 }
 
-fn shrink<C: Container>(result: ParsingResult<C>) -> ParsingResult<C> {
-    if let parco::Result::Ok(container, rest) = &mut result {
+fn shrink<C: Container>(mut result: ParsingResult<C>) -> ParsingResult<C> {
+    if let parco::Result::Ok(container, _rest) = &mut result {
         container.shrink_to_fit();
     }
     result
