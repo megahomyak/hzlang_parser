@@ -369,13 +369,13 @@ mod tests {
         }
     }
 
-    fn word(word: &str) -> NamePart {
-        NamePart::Word(Word(word.to_owned()))
-    }
-
     #[test]
     #[cfg_attr(rustfmt, rustfmt_skip)]
     fn correct_indentation() {
+        fn word(word: &str) -> NamePart {
+            NamePart::Word(Word(word.to_owned()))
+        }
+
         assert_eq!(
             parse("a-d\n-b\n-  -   c\n  --d\ne"),
             Ok(vec![
@@ -496,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn incorrect_name_filler() {
+    fn incorrect_name_filler_1() {
         assert_eq!(
             parse(r#"{"#),
             Err(Error {
@@ -507,7 +507,18 @@ mod tests {
     }
 
     #[test]
-    fn correct_dict() {
+    fn incorrect_name_filler_2() {
+        assert_eq!(
+            parse(r#"{}"#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::NameExpected
+            })
+        )
+    }
+
+    #[test]
+    fn correct_dict_1() {
         assert_eq!(
             parse(r#"["a": "b", "c": {d}]"#),
             Ok(vec![line(
@@ -531,6 +542,28 @@ mod tests {
                         )
                     ]
                 }))],
+                vec![]
+            )])
+        )
+    }
+
+    #[test]
+    fn correct_dict_2() {
+        assert_eq!(
+            parse(r#"[]"#),
+            Ok(vec![line(
+                vec![NamePart::Filler(Filler::Dict(Dict { contents: vec![] }))],
+                vec![]
+            )])
+        )
+    }
+
+    #[test]
+    fn correct_dict_3() {
+        assert_eq!(
+            parse(r#"]"#),
+            Ok(vec![line(
+                vec![NamePart::Filler(Filler::Dict(Dict { contents: vec![] }))],
                 vec![]
             )])
         )
@@ -584,6 +617,17 @@ mod tests {
     fn incorrect_dict_5() {
         assert_eq!(
             parse(r#"["a": "b" "c""#),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::ClosingBracketOrCommaExpectedInDict
+            })
+        )
+    }
+
+    #[test]
+    fn incorrect_dict_6() {
+        assert_eq!(
+            parse(r#"["a": "b" /"#),
             Err(Error {
                 line_index: 0,
                 kind: ErrorKind::ClosingBracketOrCommaExpectedInDict
