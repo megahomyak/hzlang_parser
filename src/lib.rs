@@ -17,16 +17,14 @@ pub enum ErrorKind {
     UnexpectedCharacterEscaped {
         character: char,
     },
-    WordInsideList,
-    WordAsDictKey,
-    WordAsDictValue,
     UnclosedQuote,
     UnclosedParen,
-    UnclosedBracket,
     UnclosedBrace,
-    DictValueMissing,
-    DictColonMissing,
-    CommaExpectedInDict,
+    ColonExpectedInDict,
+    FillerExpectedInList,
+    FillerExpectedAsDictKey,
+    FillerExpectedAsDictValue,
+    ClosingBracketOrCommaExpectedInDict,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -122,20 +120,11 @@ fn fail_if_empty<C: Container>(c: ParsingResult<C>) -> ParsingResult<C> {
     })
 }
 
-fn collect_repeating<
-    'a,
-    T,
-    C: FromIterator<T> + Container,
-    P: Fn(&&'a str) -> ParsingResult<'a, T>,
->(
-    rest: &'a str,
-    parser: P,
-) -> ParsingResult<'a, C> {
-    let result: ParsingResult<C> = parco::collect_repeating(rest, parser).into();
-    result.map(|mut collection| {
-        collection.shrink_to_fit();
-        collection
-    })
+fn shrink<C: Container>(result: ParsingResult<C>) -> ParsingResult<C> {
+    if let parco::Result::Ok(container, rest) = &mut result {
+        container.shrink_to_fit();
+    }
+    result
 }
 
 fn skip_whitespace(s: &str) -> &str {
@@ -148,27 +137,33 @@ fn skip_whitespace(s: &str) -> &str {
 }
 
 fn parse_raw_string_part(rest: &str) -> ParsingResult<RawHzStringPart> {
-    fail_if_empty(collect_repeating(rest, |rest| {
-        parco::one_part(*rest).and(|c, Rest(rest)| match c {
-            '{' | '"' => ParsingResult::Err,
-            '\\' => parco::one_part(rest)
-                .or(|| ErrorKind::UnclosedQuote.into())
-                .and(|c, rest| match c {
-                    '{' | '"' => ParsingResult::Ok(c, rest),
-                    _ => ErrorKind::UnexpectedCharacterEscaped { character: c }.into(),
-                }),
-            _ => ParsingResult::Ok(c, Rest(rest)),
+    fail_if_empty(shrink(
+        parco::collect_repeating(rest, |rest| {
+            parco::one_part(*rest).and(|c, Rest(rest)| match c {
+                '{' | '"' => ParsingResult::Err,
+                '\\' => parco::one_part(rest)
+                    .or(|| ErrorKind::UnclosedQuote.into())
+                    .and(|c, rest| match c {
+                        '{' | '"' => ParsingResult::Ok(c, rest),
+                        _ => ErrorKind::UnexpectedCharacterEscaped { character: c }.into(),
+                    }),
+                _ => ParsingResult::Ok(c, Rest(rest)),
+            })
         })
-    }))
+        .into(),
+    ))
     .map(|raw_part: String| RawHzStringPart(raw_part))
 }
 
 fn parse_string_parts(rest: &str) -> ParsingResult<Vec<HzStringPart>> {
-    collect_repeating(rest, |rest| {
-        parse_raw_string_part(rest)
-            .map(|raw| HzStringPart::Raw(raw))
-            .or(|| parse_braced_name(rest).map(|name| HzStringPart::Name(name)))
-    })
+    shrink(
+        parco::collect_repeating(rest, |rest| {
+            parse_raw_string_part(rest)
+                .map(|raw| HzStringPart::Raw(raw))
+                .or(|| parse_braced_name(rest).map(|name| HzStringPart::Name(name)))
+        })
+        .into(),
+    )
 }
 
 fn parse_string(rest: &str) -> ParsingResult<HzString> {
@@ -182,9 +177,12 @@ fn parse_string(rest: &str) -> ParsingResult<HzString> {
 }
 
 fn parse_word(rest: &str) -> ParsingResult<Word> {
-    fail_if_empty(collect_repeating(rest, |rest| {
-        parco::one_matching_part(*rest, |c| !("[]{}()\"".contains(*c) || c.is_whitespace()))
-    }))
+    fail_if_empty(shrink(
+        parco::collect_repeating(rest, |rest| {
+            parco::one_matching_part(*rest, |c| !("[]{}()\"".contains(*c) || c.is_whitespace()))
+        })
+        .into(),
+    ))
     .map(|word: String| Word(word))
 }
 
@@ -206,71 +204,73 @@ fn parse_filler(rest: &str) -> ParsingResult<Filler> {
         .or(|| parse_dict(rest).map(|dict| Filler::Dict(dict)))
 }
 
-fn parse_dict_contents(rest: &str) -> ParsingResult<Vec<(Filler, Filler)>> {
-    collect_repeating(rest, |rest| {
-        let rest = skip_whitespace(rest);
-        parse_filler(rest)
-            .or(|| {
-                if rest.is_empty() {
-                    ErrorKind::DictValueMissing.into()
-                } else {
-                    ErrorKind::WordAsDictKey.into()
-                }
-            })
-            .and(|key, Rest(rest)| {
-                parco::one_matching_part(skip_whitespace(rest), |c| *c == ':')
-                    .or(|| ErrorKind::DictColonMissing.into())
-                    .and(|_, Rest(rest)| {
-                        parse_filler(skip_whitespace(rest))
-                            .or(|| ErrorKind::DictValueMissing.into())
-                            .and(|value, rest| ParsingResult::Ok((key, value), rest))
-                    })
-            })
-    })
-}
-
-fn parse_dict(rest: &str) -> ParsingResult<Dict> {
-    fn parse_closing_bracket(dict: Dict, rest: &str) -> ParsingResult<Dict> {
-        parco::one_matching_part(rest, |c| *c == ']')
-            .or(|| ErrorKind::UnclosedBracket.into())
-            .and(|_, rest| ParsingResult::Ok(dict, rest))
-    }
-
-    parco::one_matching_part(rest, |c| *c == '[')
-        .and(|_, Rest(rest)| parse_dict_contents(rest).map(|contents| Dict { contents }))
-        .and(|dict, Rest(rest)| {
-            parco::one_matching_part(rest, |c| *c == ']')
-                .or(|| ErrorKind::UnclosedBracket.into())
-                .and(|_, rest| ParsingResult::Ok(dict, rest))
-                .or(|| {
-                    parco::one_matching_part(rest, |c| *c == ',').and(|_, Rest(rest)| {
-                        parco::one_matching_part(rest, |c| *c == ']')
-                            .or(|| ErrorKind::UnclosedBracket.into())
-                            .and(|_, rest| ParsingResult::Ok(dict, rest))
-                    })
+fn parse_dict_pair(rest: &str) -> ParsingResult<(Filler, Filler)> {
+    parse_filler(skip_whitespace(rest))
+        .or(|| ErrorKind::FillerExpectedAsDictKey.into())
+        .and(|key, Rest(rest)| {
+            parco::one_matching_part(skip_whitespace(rest), |c| *c == ':')
+                .or(|| ErrorKind::ColonExpectedInDict.into())
+                .and(|_, Rest(rest)| {
+                    parse_filler(skip_whitespace(rest))
+                        .or(|| ErrorKind::FillerExpectedAsDictValue.into())
+                        .and(|value, rest| ParsingResult::Ok((key, value), rest))
                 })
         })
 }
 
+fn parse_dict_contents(rest: &str) -> ParsingResult<Vec<(Filler, Filler)>> {
+    shrink(
+        ParsingResult::from(parco::collect_repeating(rest, |rest| {
+            parse_dict_pair(rest).and(|pair, Rest(rest)| {
+                parco::one_matching_part(skip_whitespace(rest), |c| *c == ',')
+                    .and(|_, rest| ParsingResult::Ok(pair, rest))
+            })
+        }))
+        .and(|mut pairs: Vec<_>, Rest(rest)| {
+            parse_dict_pair(rest).map(|pair| {
+                pairs.push(pair);
+                pairs
+            })
+        }),
+    )
+    .or(|| ParsingResult::Ok(Vec::new(), Rest(rest)))
+}
+
+fn parse_dict(rest: &str) -> ParsingResult<Dict> {
+    parco::one_matching_part(rest, |c| *c == '[')
+        .and(|_, Rest(rest)| parse_dict_contents(rest).map(|contents| Dict { contents }))
+        .and(|contents, Rest(rest)| {
+            parco::one_matching_part(rest, |c| *c == ']')
+                .or(|| ErrorKind::ClosingBracketOrCommaExpectedInDict.into())
+                .and(|_, rest| ParsingResult::Ok(contents, rest))
+        })
+}
+
 fn parse_name(rest: &str) -> ParsingResult<Name> {
-    fail_if_empty(collect_repeating(rest, |rest| {
-        let rest = skip_whitespace(rest);
-        parse_filler(rest)
-            .map(|filler| NamePart::Filler(filler))
-            .or(|| parse_word(rest).map(|word| NamePart::Word(word)))
-    }))
+    fail_if_empty(shrink(
+        parco::collect_repeating(rest, |rest| {
+            let rest = skip_whitespace(rest);
+            parse_filler(rest)
+                .map(|filler| NamePart::Filler(filler))
+                .or(|| parse_word(rest).map(|word| NamePart::Word(word)))
+        })
+        .into(),
+    ))
     .map(|contents| Name { contents })
 }
 
 fn parse_list(rest: &str) -> ParsingResult<List> {
     parco::one_matching_part(rest, |c| *c == '(').and(|_, Rest(rest)| {
-        collect_repeating(rest, |rest| {
-            parse_filler(skip_whitespace(rest)).or(|| match rest.take_one_part() {
-                None => ErrorKind::UnclosedParen.into(),
-                Some((')', rest)) => ParsingResult::Err,
-                Some(_) => ErrorKind::WordInsideList.into(),
+        shrink(
+            parco::collect_repeating(rest, |rest| {
+                parse_filler(skip_whitespace(rest)).or(|| match rest.take_one_part() {
+                    None => ErrorKind::UnclosedParen.into(),
+                    Some((')', _rest)) => ParsingResult::Err,
+                    Some(_) => ErrorKind::FillerExpectedInList.into(),
+                })
             })
-        })
+            .into(),
+        )
         .map(|contents| List { contents })
     })
 }
