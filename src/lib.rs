@@ -331,7 +331,7 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
                 root.last_mut().unwrap()
             }
         };
-        if let Some((_next_index, next_line)) = program.peek() {
+        if let Some((next_index, next_line)) = program.peek() {
             let (next_level, _next_unindented) = unindent(next_line);
             if next_level == level + 1 {
                 levels.push((&mut line.attached) as *mut _);
@@ -341,7 +341,7 @@ pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
                     expected_indentations.insert(level - 1);
                 }
                 return Err(Error {
-                    line_index: index,
+                    line_index: *next_index,
                     kind: ErrorKind::Overindented {
                         present_indentation: next_level,
                         expected_indentations,
@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(
             parse("-a"),
             Err(Error {
-                line_index: 1,
+                line_index: 0,
                 kind: ErrorKind::Overindented {
                     expected_indentations: HashSet::from([0]),
                     present_indentation: 1
@@ -436,7 +436,31 @@ mod tests {
     }
 
     #[test]
-    fn correct_string() {}
+    fn correct_string() {
+        assert_eq!(
+            parse("\"abc{def\"ghi\"jkl}mn\\\"o\""),
+            Ok(vec![line(
+                vec![NamePart::Filler(Filler::String(HzString {
+                    parts: vec![
+                        HzStringPart::Raw(RawHzStringPart("abc".to_owned())),
+                        HzStringPart::Name(Name {
+                            contents: vec![
+                                NamePart::Word(Word("def".to_owned())),
+                                NamePart::Filler(Filler::String(HzString {
+                                    parts: vec![HzStringPart::Raw(RawHzStringPart(
+                                        "ghi".to_owned()
+                                    ))]
+                                })),
+                                NamePart::Word(Word("jkl".to_owned())),
+                            ]
+                        }),
+                        HzStringPart::Raw(RawHzStringPart("mn\"o".to_owned())),
+                    ]
+                }))],
+                vec![]
+            )])
+        );
+    }
 
     #[test]
     fn incorrect_string_1() {}
