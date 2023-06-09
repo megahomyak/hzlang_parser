@@ -25,6 +25,7 @@ pub enum ErrorKind {
     FillerExpectedAsDictKey,
     FillerExpectedAsDictValue,
     ClosingBracketOrCommaExpectedInDict,
+    NameExpected,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -188,10 +189,9 @@ fn parse_word(rest: &str) -> ParsingResult<Word> {
 
 fn parse_braced_name(rest: &str) -> ParsingResult<Name> {
     parco::one_matching_part(rest, |c| *c == '{')
-        .and(|_, Rest(rest)| parse_name(rest))
+        .and(|_, Rest(rest)| parse_name(rest).or(|| ErrorKind::NameExpected.into()))
         .and(|name, Rest(rest)| {
-            parco::one_part(rest)
-                .or(|| ErrorKind::UnclosedBrace.into())
+            parco::one_matching_part(rest, |c| *c == '}')
                 .and(|_, rest| ParsingResult::Ok(name, rest))
         })
 }
@@ -463,16 +463,46 @@ mod tests {
     }
 
     #[test]
-    fn incorrect_string_1() {}
+    fn incorrect_string_1() {
+        assert_eq!(
+            parse("\""),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::UnclosedQuote,
+            })
+        )
+    }
 
     #[test]
-    fn incorrect_string_2() {}
+    fn incorrect_string_2() {
+        assert_eq!(
+            parse("\"\\"),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::UnclosedQuote,
+            })
+        )
+    }
 
     #[test]
-    fn incorrect_string_3() {}
+    fn incorrect_string_3() {
+        assert_eq!(
+            parse("\"\\a"),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::UnexpectedCharacterEscaped { character: 'a' },
+            })
+        )
+    }
 
     #[test]
     fn incorrect_name_filler() {
-        assert_eq!(parse("{"), Err(Error { line_index: 0, kind: ErrorKind::ClosingBracketOrCommaExpectedInDict }))
+        assert_eq!(
+            parse("{"),
+            Err(Error {
+                line_index: 0,
+                kind: ErrorKind::NameExpected
+            })
+        )
     }
 }
