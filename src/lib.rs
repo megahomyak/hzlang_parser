@@ -264,17 +264,13 @@ fn parse_name_contents(rest: &str) -> ParsingResult<Vec<NamePart>> {
 
 fn parse_list(rest: &str) -> ParsingResult<List> {
     parco::one_matching_part(rest, |c| *c == '(').and(|_, Rest(rest)| {
-        shrink(
-            parco::collect_repeating(rest, |rest| {
-                parse_filler(skip_whitespace(rest)).or(|| match rest.take_one_part() {
-                    None => ErrorKind::UnclosedParen.into(),
-                    Some((')', rest)) => ParsingResult::Ok(')', rest),
-                    Some(_) => ErrorKind::FillerExpectedInList.into(),
-                })
+        shrink(parco::collect_repeating(rest, |rest| parse_filler(skip_whitespace(rest))).into())
+            .map(|contents| List { contents })
+            .or(|| match rest.take_one_part() {
+                None => ErrorKind::UnclosedParen.into(),
+                Some((')', rest)) => ParsingResult::Ok(List { contents: Vec::new() }, rest),
+                Some(_) => ErrorKind::FillerExpectedInList.into(),
             })
-            .into(),
-        )
-        .map(|contents| List { contents })
     })
 }
 
