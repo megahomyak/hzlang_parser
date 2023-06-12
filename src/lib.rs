@@ -4,6 +4,11 @@ pub struct ActionInvocation {
     pub attached: Vec<ActionInvocation>,
 }
 
+#[derive(PartialEq, Eq, Debug)]
+pub struct Program {
+    pub contents: Vec<ActionInvocation>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum ErrorKind {
     OverindentedLine {
@@ -934,7 +939,7 @@ mod program {
         }
     }
 
-    pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
+    pub fn parse(program: &str) -> Result<Program, Error> {
         let mut program = program.lines().enumerate().peekable();
         let mut root = Vec::new();
         let mut levels: Vec<*mut Vec<ActionInvocation>> = Vec::new();
@@ -1008,7 +1013,7 @@ mod program {
                 }
             }
         }
-        Ok(root)
+        Ok(Program { contents: root })
     }
 
     #[cfg(test)]
@@ -1024,7 +1029,7 @@ mod program {
 
         #[test]
         fn empty_program() {
-            assert_eq!(parse(""), Ok(vec![]));
+            assert_eq!(parse(""), Ok(Program { contents: vec![] }));
         }
 
         #[test]
@@ -1036,7 +1041,7 @@ mod program {
 
             assert_eq!(
                 parse("a-d\n-b\n-  -   c\n  --d\ne"),
-                Ok(vec![
+                Ok(Program { contents: vec![
                     line(
                         Vec::from([word("a-d")]),
                         vec![
@@ -1047,7 +1052,7 @@ mod program {
                         ],
                     ),
                     line(Vec::from([word("e")]), vec![]),
-                ])
+                ]})
             );
         }
 
@@ -1109,6 +1114,6 @@ mod program {
     }
 }
 
-pub fn parse(program: &str) -> Result<Vec<ActionInvocation>, Error> {
+pub fn parse(program: &str) -> Result<Program, Error> {
     program::parse(program)
 }
