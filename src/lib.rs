@@ -1,16 +1,33 @@
 #[derive(PartialEq, Eq, Debug)]
+pub struct Comment(pub String);
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct Line {
+    pub contents: LineContents,
+    pub attached: Vec<Line>,
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct LineContents {
+    action_invocation: Option<ActionInvocation>,
+    comment: Option<Comment>,
+}
+
+#[derive(PartialEq, Eq, Debug)]
 pub struct ActionInvocation {
     pub name: Name,
-    pub attached: Vec<ActionInvocation>,
 }
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct Program {
-    pub contents: Vec<ActionInvocation>,
+    pub contents: Vec<Line>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ErrorKind {
+    FirstLineIndented {
+        present_indentation: usize,
+    },
     OverindentedLine {
         max_allowed_indentation: usize,
         present_indentation: usize,
@@ -270,7 +287,7 @@ mod word {
     use super::*;
 
     fn parse_char(rest: &str) -> ParsingResult<char> {
-        parco::one_matching_part(rest, |c| !("()[]{}\"".contains(*c) || c.is_whitespace()))
+        parco::one_matching_part(rest, |c| !("()[]{}\"|".contains(*c) || c.is_whitespace()))
     }
 
     pub fn parse(rest: &str) -> ParsingResult<Word> {
@@ -299,6 +316,19 @@ mod word {
         #[test]
         fn unexpected_quote() {
             assert_eq!(parse("\""), ParsingResult::Err,);
+        }
+
+        #[test]
+        fn a_word_and_a_comment() {
+            assert_eq!(
+                parse("blah|abc"),
+                ParsingResult::Ok(Word("blah".to_owned()), "|abc")
+            );
+        }
+
+        #[test]
+        fn just_a_comment() {
+            assert_eq!(parse("|abc"), ParsingResult::Err,);
         }
     }
 }
@@ -831,36 +861,54 @@ mod dict {
     }
 }
 
-mod line {
+mod line_contents {
     use super::*;
 
-    fn map_unexpected_character(c: char) -> ErrorKind {
+    fn map_unexpected_character(c: char, rest: &str) -> Result<Comment, ErrorKind> {
         match c {
-            '}' => ErrorKind::UnexpectedClosingBraceInLine,
-            ']' => ErrorKind::UnexpectedClosingBracketInLine,
-            ')' => ErrorKind::UnexpectedClosingParenInLine,
+            '}' => Err(ErrorKind::UnexpectedClosingBraceInLine),
+            ']' => Err(ErrorKind::UnexpectedClosingBracketInLine),
+            ')' => Err(ErrorKind::UnexpectedClosingParenInLine),
+            '|' => Ok(Comment(rest.to_owned())),
             _ => unreachable!(),
         }
     }
 
-    pub fn parse(unindented: &str) -> Result<Option<Name>, ErrorKind> {
+    pub fn parse(unindented: &str) -> Result<LineContents, ErrorKind> {
         if unindented.is_empty() {
-            Ok(None)
+            Ok(LineContents {
+                comment: None,
+                action_invocation: None,
+            })
         } else {
             match name::parse(unindented) {
                 ParsingResult::Ok(name, rest) => {
                     let rest = skip_whitespace(rest);
+                    let action_invocation = ActionInvocation { name };
                     match parco::Input::take_one_part(&rest) {
-                        None => Ok(Some(name)),
-                        Some((unexpected_character, _rest)) => {
-                            Err(map_unexpected_character(unexpected_character))
+                        None => Ok(LineContents {
+                            action_invocation: Some(action_invocation),
+                            comment: None,
+                        }),
+                        Some((unexpected_character, rest)) => {
+                            map_unexpected_character(unexpected_character, rest).map(|comment| {
+                                LineContents {
+                                    comment: Some(comment),
+                                    action_invocation: Some(action_invocation),
+                                }
+                            })
                         }
                     }
                 }
                 ParsingResult::Err => match parco::Input::take_one_part(&unindented) {
                     None => unreachable!(),
-                    Some((unexpected_character, _rest)) => {
-                        Err(map_unexpected_character(unexpected_character))
+                    Some((unexpected_character, rest)) => {
+                        map_unexpected_character(unexpected_character, rest).map(|comment| {
+                            LineContents {
+                                action_invocation: None,
+                                comment: Some(comment),
+                            }
+                        })
                     }
                 },
                 ParsingResult::Fatal(error) => Err(error),
@@ -904,19 +952,41 @@ mod line {
 
         #[test]
         fn empty_line() {
-            assert_eq!(parse(""), Ok(None));
+            assert_eq!(
+                parse(""),
+                Ok(LineContents {
+                    action_invocation: None,
+                    comment: None
+                })
+            );
         }
 
         #[test]
         fn correct_line() {
             assert_eq!(
-                parse("a b"),
-                Ok(Some(Name {
-                    parts: vec![
-                        NamePart::Word(Word("a".to_owned())),
-                        NamePart::Word(Word("b".to_owned()))
-                    ]
-                }))
+                parse("a b | c"),
+                Ok(LineContents {
+                    comment: Some(Comment(" c".to_owned())),
+                    action_invocation: Some(ActionInvocation {
+                        name: Name {
+                            parts: vec![
+                                NamePart::Word(Word("a".to_owned())),
+                                NamePart::Word(Word("b".to_owned()))
+                            ]
+                        }
+                    })
+                })
+            );
+        }
+
+        #[test]
+        fn just_a_comment() {
+            assert_eq!(
+                parse("|abc"),
+                Ok(LineContents {
+                    action_invocation: None,
+                    comment: Some(Comment("abc".to_owned()))
+                })
             );
         }
     }
@@ -942,48 +1012,40 @@ mod program {
     pub fn parse(program: &str) -> Result<Program, Error> {
         let mut program = program.lines().enumerate().peekable();
         let mut root = Vec::new();
-        let mut levels: Vec<*mut Vec<ActionInvocation>> = Vec::new();
+        let mut levels: Vec<*mut Vec<Line>> = Vec::new();
         while let Some((index, line)) = program.next() {
             let (level, unindented) = unindent(line);
             if level != 0 && index == 0 {
                 return Err(Error {
-                    kind: ErrorKind::OverindentedLine {
-                        max_allowed_indentation: 0,
+                    line_index: index,
+                    kind: ErrorKind::FirstLineIndented {
                         present_indentation: level,
                     },
-                    line_index: index,
                 });
             }
-            let name = line::parse(skip_whitespace(unindented));
-            let name = match name {
-                Err(error_kind) => {
-                    return Err(Error {
-                        line_index: index,
-                        kind: error_kind,
-                    })
-                }
-                Ok(name) => name,
+            let line_contents =
+                line_contents::parse(skip_whitespace(unindented)).map_err(|error_kind| Error {
+                    line_index: index,
+                    kind: error_kind,
+                })?;
+            let line = Line {
+                attached: Vec::new(),
+                contents: line_contents,
             };
-            let line = name.map(|name| {
-                let line = ActionInvocation {
-                    name,
-                    attached: Vec::new(),
-                };
-                match levels.iter_mut().rev().next() {
-                    Some(level) => {
-                        let level: &mut _ = unsafe { &mut **level };
-                        level.push(line);
-                        level.last_mut().unwrap()
-                    }
-                    None => {
-                        root.push(line);
-                        root.last_mut().unwrap()
-                    }
+            let line = match levels.iter_mut().rev().next() {
+                Some(level) => {
+                    let level: &mut _ = unsafe { &mut **level };
+                    level.push(line);
+                    level.last_mut().unwrap()
                 }
-            });
+                None => {
+                    root.push(line);
+                    root.last_mut().unwrap()
+                }
+            };
             if let Some((next_index, next_line)) = program.peek() {
                 let (next_level, _next_unindented) = unindent(next_line);
-                if let Some(line) = line {
+                if line.contents.action_invocation.is_some() {
                     if next_level == level + 1 {
                         levels.push((&mut line.attached) as *mut _);
                     } else if next_level > level {
@@ -1020,10 +1082,15 @@ mod program {
     mod tests {
         use super::*;
 
-        fn line(contents: Vec<NamePart>, attached: Vec<ActionInvocation>) -> ActionInvocation {
-            ActionInvocation {
+        fn line(contents: Vec<NamePart>, attached: Vec<Line>) -> Line {
+            Line {
                 attached,
-                name: Name { parts: contents },
+                contents: LineContents {
+                    action_invocation: Some(ActionInvocation {
+                        name: Name { parts: contents },
+                    }),
+                    comment: None,
+                },
             }
         }
 
@@ -1062,8 +1129,7 @@ mod program {
                 parse("-a"),
                 Err(Error {
                     line_index: 0,
-                    kind: ErrorKind::OverindentedLine {
-                        max_allowed_indentation: 0,
+                    kind: ErrorKind::FirstLineIndented {
                         present_indentation: 1
                     }
                 })
