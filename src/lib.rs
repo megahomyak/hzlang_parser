@@ -36,11 +36,7 @@ pub enum ErrorKind {
         max_allowed_indentation: usize,
         present_indentation: usize,
     },
-    UnexpectedCharacterEscapedInString {
-        character: char,
-    },
     UnclosedStringQuote,
-    EscapeCharAtEndOfLineInString,
     UnclosedBracedNameBrace,
     NameExpectedInBraces,
     FillerExpectedInList,
@@ -158,15 +154,7 @@ mod string {
         use super::*;
 
         fn parse_char(rest: &str) -> ParsingResult<char> {
-            parco::one_matching_part(rest, |c| !['"', '{'].contains(c)).and(|c, rest| match c {
-                '\\' => parco::one_part(rest)
-                    .or(|| ErrorKind::EscapeCharAtEndOfLineInString.into())
-                    .and(|c, rest| match c {
-                        '{' | '"' | '\\' => ParsingResult::Ok(c, rest),
-                        _ => ErrorKind::UnexpectedCharacterEscapedInString { character: c }.into(),
-                    }),
-                _ => ParsingResult::Ok(c, rest),
-            })
+            parco::one_matching_part(rest, |c| !['"', '{'].contains(c))
         }
 
         pub fn parse(rest: &str) -> ParsingResult<RawHzStringPart> {
@@ -219,16 +207,6 @@ mod string {
         }
 
         #[test]
-        fn unexpected_character_escaped() {
-            assert_eq!(
-                parse(r#""\a""#),
-                ParsingResult::Fatal(ErrorKind::UnexpectedCharacterEscapedInString {
-                    character: 'a'
-                })
-            );
-        }
-
-        #[test]
         fn unclosed_quote() {
             assert_eq!(
                 parse(r#""text"#),
@@ -241,14 +219,6 @@ mod string {
             assert_eq!(
                 parse(r#"""#),
                 ParsingResult::Fatal(ErrorKind::UnclosedStringQuote)
-            );
-        }
-
-        #[test]
-        fn escape_at_end_of_string() {
-            assert_eq!(
-                parse(r#""\"#),
-                ParsingResult::Fatal(ErrorKind::EscapeCharAtEndOfLineInString)
             );
         }
 
