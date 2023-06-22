@@ -1,29 +1,29 @@
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct Comment(pub String);
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct Line {
     pub contents: LineContents,
     pub attached: Vec<Line>,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct LineContents {
     action_invocation: Option<ActionInvocation>,
     comment: Option<Comment>,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct ActionInvocation {
     pub name: Name,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct Program {
     pub contents: Vec<Line>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum ErrorKind {
     FirstLineIndented {
         present_indentation: usize,
@@ -51,38 +51,38 @@ pub enum ErrorKind {
     UnexpectedClosingBraceInLine,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Error {
     pub line_index: usize,
     pub kind: ErrorKind,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct Word(pub String);
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub enum NamePart {
     Word(Word),
     Filler(Filler),
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct Name {
     pub parts: Vec<NamePart>,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct Dict {
     pub pairs: Vec<DictPair>,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct DictPair {
     pub key: Filler,
     pub value: Filler,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub enum Filler {
     String(HzString),
     Name(Name),
@@ -90,21 +90,21 @@ pub enum Filler {
     Dict(Dict),
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct List {
     pub items: Vec<Filler>,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct RawHzStringPart(pub String);
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub enum HzStringPart {
     Raw(RawHzStringPart),
     Name(Name),
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 pub struct HzString {
     pub parts: Vec<HzStringPart>,
 }
