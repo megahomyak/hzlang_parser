@@ -2,15 +2,15 @@
 pub struct Comment(pub String);
 
 #[derive(PartialEq, Eq, Debug, Hash)]
-pub struct Line {
-    pub contents: LineContents,
-    pub attached: Vec<Line>,
-}
-
-#[derive(PartialEq, Eq, Debug, Hash)]
-pub struct LineContents {
-    pub action_invocation: Option<ActionInvocation>,
-    pub comment: Option<Comment>,
+pub enum Line {
+    Empty {
+        comment: Option<Comment>,
+    },
+    Filled {
+        action_invocation: ActionInvocation,
+        comment: Option<Comment>,
+        attached: Vec<Line>,
+    },
 }
 
 #[derive(PartialEq, Eq, Debug, Hash)]
@@ -831,7 +831,7 @@ mod dict {
     }
 }
 
-mod line_contents {
+mod line {
     use super::*;
 
     fn map_unexpected_character(c: char, rest: &str) -> Result<Comment, ErrorKind> {
@@ -844,27 +844,26 @@ mod line_contents {
         }
     }
 
-    pub fn parse(unindented: &str) -> Result<LineContents, ErrorKind> {
+    pub fn parse(unindented: &str) -> Result<Line, ErrorKind> {
         if unindented.is_empty() {
-            Ok(LineContents {
-                comment: None,
-                action_invocation: None,
-            })
+            Ok(Line::Empty { comment: None })
         } else {
             match name::parse(unindented) {
                 ParsingResult::Ok(name, rest) => {
                     let rest = skip_whitespace(rest);
                     let action_invocation = ActionInvocation { name };
                     match parco::Input::take_one_part(&rest) {
-                        None => Ok(LineContents {
-                            action_invocation: Some(action_invocation),
+                        None => Ok(Line::Filled {
+                            action_invocation,
                             comment: None,
+                            attached: Vec::new(),
                         }),
                         Some((unexpected_character, rest)) => {
                             map_unexpected_character(unexpected_character, rest).map(|comment| {
-                                LineContents {
+                                Line::Filled {
+                                    action_invocation,
                                     comment: Some(comment),
-                                    action_invocation: Some(action_invocation),
+                                    attached: Vec::new(),
                                 }
                             })
                         }
@@ -874,8 +873,7 @@ mod line_contents {
                     None => unreachable!(),
                     Some((unexpected_character, rest)) => {
                         map_unexpected_character(unexpected_character, rest).map(|comment| {
-                            LineContents {
-                                action_invocation: None,
+                            Line::Empty {
                                 comment: Some(comment),
                             }
                         })
@@ -922,29 +920,24 @@ mod line_contents {
 
         #[test]
         fn empty_line() {
-            assert_eq!(
-                parse(""),
-                Ok(LineContents {
-                    action_invocation: None,
-                    comment: None
-                })
-            );
+            assert_eq!(parse(""), Ok(Line::Empty { comment: None }));
         }
 
         #[test]
         fn correct_line() {
             assert_eq!(
                 parse("a b | c"),
-                Ok(LineContents {
+                Ok(Line::Filled {
+                    attached: vec![],
                     comment: Some(Comment(" c".to_owned())),
-                    action_invocation: Some(ActionInvocation {
+                    action_invocation: ActionInvocation {
                         name: Name {
                             parts: vec![
                                 NamePart::Word(Word("a".to_owned())),
                                 NamePart::Word(Word("b".to_owned()))
                             ]
                         }
-                    })
+                    }
                 })
             );
         }
@@ -953,8 +946,7 @@ mod line_contents {
         fn just_a_comment() {
             assert_eq!(
                 parse("|abc"),
-                Ok(LineContents {
-                    action_invocation: None,
+                Ok(Line::Empty {
                     comment: Some(Comment("abc".to_owned()))
                 })
             );
@@ -993,15 +985,10 @@ mod program {
                     },
                 });
             }
-            let line_contents =
-                line_contents::parse(skip_whitespace(unindented)).map_err(|error_kind| Error {
-                    line_index: index,
-                    kind: error_kind,
-                })?;
-            let line = Line {
-                attached: Vec::new(),
-                contents: line_contents,
-            };
+            let line = line::parse(skip_whitespace(unindented)).map_err(|error_kind| Error {
+                line_index: index,
+                kind: error_kind,
+            })?;
             let line = match levels.iter_mut().rev().next() {
                 Some(level) => {
                     let level: &mut _ = unsafe { &mut **level };
@@ -1015,27 +1002,30 @@ mod program {
             };
             if let Some((next_index, next_line)) = program.peek() {
                 let (next_level, _next_unindented) = unindent(next_line);
-                if line.contents.action_invocation.is_some() {
-                    if next_level == level + 1 {
-                        levels.push((&mut line.attached) as *mut _);
-                    } else if next_level > level {
-                        return Err(Error {
-                            line_index: *next_index,
-                            kind: ErrorKind::OverindentedLine {
-                                max_allowed_indentation: level + 1,
-                                present_indentation: next_level,
-                            },
-                        });
+                match &line {
+                    Line::Filled { attached, .. } => {
+                        if next_level == level + 1 {
+                            levels.push(attached as *const _ as *mut _);
+                        } else if next_level > level {
+                            return Err(Error {
+                                line_index: *next_index,
+                                kind: ErrorKind::OverindentedLine {
+                                    max_allowed_indentation: level + 1,
+                                    present_indentation: next_level,
+                                },
+                            });
+                        }
                     }
-                } else {
-                    if next_level > level {
-                        return Err(Error {
-                            line_index: *next_index,
-                            kind: ErrorKind::IndentationLevelIncreasedAfterEmptyLine {
-                                max_allowed_indentation: level,
-                                present_indentation: next_level,
-                            },
-                        });
+                    Line::Empty { .. } => {
+                        if next_level > level {
+                            return Err(Error {
+                                line_index: *next_index,
+                                kind: ErrorKind::IndentationLevelIncreasedAfterEmptyLine {
+                                    max_allowed_indentation: level,
+                                    present_indentation: next_level,
+                                },
+                            });
+                        }
                     }
                 }
                 if let Some(rollback) = level.checked_sub(next_level) {
@@ -1053,14 +1043,12 @@ mod program {
         use super::*;
 
         fn line(contents: Vec<NamePart>, attached: Vec<Line>) -> Line {
-            Line {
+            Line::Filled {
                 attached,
-                contents: LineContents {
-                    action_invocation: Some(ActionInvocation {
-                        name: Name { parts: contents },
-                    }),
-                    comment: None,
+                action_invocation: ActionInvocation {
+                    name: Name { parts: contents },
                 },
+                comment: None,
             }
         }
 
