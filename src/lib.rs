@@ -9,8 +9,8 @@ pub struct Line {
 
 #[derive(PartialEq, Eq, Debug, Hash)]
 pub struct LineContents {
-    action_invocation: Option<ActionInvocation>,
-    comment: Option<Comment>,
+    pub action_invocation: Option<ActionInvocation>,
+    pub comment: Option<Comment>,
 }
 
 #[derive(PartialEq, Eq, Debug, Hash)]
